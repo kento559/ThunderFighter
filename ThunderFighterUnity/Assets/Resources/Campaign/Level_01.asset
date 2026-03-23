@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ea1ceceb468116149ae9a62ed6b1d5b5, type: 3}
+  m_Name: Level_01
+  m_EditorClassIdentifier: 
+  <ChapterIndex>k__BackingField: 1
+  <SceneName>k__BackingField: Level_01
+  <ChapterTitle>k__BackingField: CHAPTER 1
+  <Subtitle>k__BackingField: Orbital Intercept
+  <ObjectiveText>k__BackingField: Intercept hostile craft and clear the orbital corridor.
+  <StartAnnouncement>k__BackingField: ORBITAL DEFENSE SCRAMBLE
+  <MidAnnouncement>k__BackingField: HOSTILE RING BROKEN
+  <BossAnnouncement>k__BackingField: 'WARNING: COMMAND SHIP APPROACH'
+  <Theme>k__BackingField: 0
+  <WaveConfig>k__BackingField: {fileID: 11400000, guid: 0a5a838fa6826494793bbba26c858e96, type: 2}
+  <BossPrefab>k__BackingField: {fileID: 4794422685822933913, guid: ee265a6bf85b1f34a872e666abfb0ec0, type: 3}
+  <RecommendedPower>k__BackingField: 100
+  <DifficultyLabel>k__BackingField: NORMAL
+  <AccentColor>k__BackingField: {r: 0.38, g: 0.84, b: 1, a: 1}

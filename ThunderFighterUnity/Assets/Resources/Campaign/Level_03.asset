@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ea1ceceb468116149ae9a62ed6b1d5b5, type: 3}
+  m_Name: Level_03
+  m_EditorClassIdentifier: 
+  <ChapterIndex>k__BackingField: 3
+  <SceneName>k__BackingField: Level_03
+  <ChapterTitle>k__BackingField: CHAPTER 3
+  <Subtitle>k__BackingField: Deep Space Flagship
+  <ObjectiveText>k__BackingField: Engage the flagship task force and neutralize the
+    war core.
+  <StartAnnouncement>k__BackingField: DEEP SPACE TRANSMISSION JAMMED
+  <MidAnnouncement>k__BackingField: ENEMY FLEET PRESSURE RISING
+  <BossAnnouncement>k__BackingField: 'WARNING: FLAGSHIP CORE ONLINE'
+  <Theme>k__BackingField: 2
+  <WaveConfig>k__BackingField: {fileID: 11400000, guid: 3b7d7be176e8d7b4e99d857caa26ffea, type: 2}
+  <BossPrefab>k__BackingField: {fileID: 5624115369430240995, guid: 64ef46aded2ed3b49a0e9cfbbce2beb6, type: 3}
+  <RecommendedPower>k__BackingField: 165
+  <DifficultyLabel>k__BackingField: EXTREME
+  <AccentColor>k__BackingField: {r: 0.54, g: 0.84, b: 1, a: 1}
