@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 43506242e39fac84c9284d3c1673ab5c, type: 3}
+  m_Name: WaveConfig_Main
+  m_EditorClassIdentifier: Assembly-CSharp::ThunderFighter.Spawning.WaveConfig
+  <Waves>k__BackingField:
+  - enemyPrefab: {fileID: 8738835334517933927, guid: d9aaf168752e066498b1b43474efe3a1, type: 3}
+    count: 12
+    spawnInterval: 0.6
+    startDelay: 0
+  - enemyPrefab: {fileID: 8738835334517933927, guid: d9aaf168752e066498b1b43474efe3a1, type: 3}
+    count: 14
+    spawnInterval: 0.5
+    startDelay: 2
+  - enemyPrefab: {fileID: 6934338837960707013, guid: 54113fb28e0597f44bad267e79e43b06, type: 3}
+    count: 8
+    spawnInterval: 0.8
+    startDelay: 2.2
+  - enemyPrefab: {fileID: 8738835334517933927, guid: d9aaf168752e066498b1b43474efe3a1, type: 3}
+    count: 16
+    spawnInterval: 0.45
+    startDelay: 1.8
+  <BossSpawnDelayAfterLastWave>k__BackingField: 3
