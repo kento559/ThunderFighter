@@ -21,6 +21,8 @@ namespace ThunderFighter.Combat
 
         private static AudioClip hitClip;
         private static AudioClip deathClip;
+        private static AudioClip flankDeathClip;
+        private static AudioClip diveDeathClip;
 
         private void Awake()
         {
@@ -113,7 +115,8 @@ namespace ThunderFighter.Combat
 
             if (deathClip != null)
             {
-                PlayFeedbackClip(deathClip, heavyTarget ? 0.72f : 0.95f, (heavyTarget ? 0.45f : 0.35f) * GameSettingsService.SfxVolume);
+                ResolveDeathClip(out AudioClip clip, out float pitch, out float volumeScale);
+                PlayFeedbackClip(clip ?? deathClip, pitch * (heavyTarget ? 0.9f : 1f), volumeScale * (heavyTarget ? 0.45f : 0.35f) * GameSettingsService.SfxVolume);
             }
         }
 
@@ -327,6 +330,33 @@ namespace ThunderFighter.Combat
             return flashColor;
         }
 
+        private void ResolveDeathClip(out AudioClip clip, out float pitch, out float volumeScale)
+        {
+            clip = deathClip;
+            pitch = 0.95f;
+            volumeScale = 1f;
+
+            Enemy.EnemyController enemy = GetComponent<Enemy.EnemyController>();
+            if (enemy == null)
+            {
+                return;
+            }
+
+            switch (enemy.CurrentBehaviorType)
+            {
+                case Config.EnemyBehaviorType.Flank:
+                    clip = flankDeathClip ?? deathClip;
+                    pitch = 1.08f;
+                    volumeScale = 1.06f;
+                    break;
+                case Config.EnemyBehaviorType.Dive:
+                    clip = diveDeathClip ?? deathClip;
+                    pitch = 0.82f;
+                    volumeScale = 1.12f;
+                    break;
+            }
+        }
+
         private static void EnsureAudioClips()
         {
             if (hitClip == null)
@@ -337,6 +367,16 @@ namespace ThunderFighter.Combat
             if (deathClip == null)
             {
                 deathClip = BuildTone("death", 260f, 0.2f, 0.13f);
+            }
+
+            if (flankDeathClip == null)
+            {
+                flankDeathClip = BuildSweep("flank-death", 640f, 320f, 0.18f, 0.12f);
+            }
+
+            if (diveDeathClip == null)
+            {
+                diveDeathClip = BuildSweep("dive-death", 220f, 90f, 0.24f, 0.14f);
             }
         }
 
@@ -350,6 +390,25 @@ namespace ThunderFighter.Combat
             {
                 float t = (float)i / sampleRate;
                 float envelope = 1f - (t / duration);
+                data[i] = Mathf.Sin(2f * Mathf.PI * frequency * t) * envelope * volume;
+            }
+
+            AudioClip clip = AudioClip.Create(clipName, sampleCount, 1, sampleRate, false);
+            clip.SetData(data, 0);
+            return clip;
+        }
+
+        private static AudioClip BuildSweep(string clipName, float startFrequency, float endFrequency, float duration, float volume)
+        {
+            int sampleRate = 44100;
+            int sampleCount = Mathf.CeilToInt(sampleRate * duration);
+            float[] data = new float[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
+            {
+                float t = (float)i / sampleRate;
+                float progress = t / duration;
+                float frequency = Mathf.Lerp(startFrequency, endFrequency, progress);
+                float envelope = Mathf.Sin(progress * Mathf.PI);
                 data[i] = Mathf.Sin(2f * Mathf.PI * frequency * t) * envelope * volume;
             }
 

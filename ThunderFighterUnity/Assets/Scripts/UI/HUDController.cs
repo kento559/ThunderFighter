@@ -11,10 +11,18 @@ namespace ThunderFighter.UI
         [SerializeField] private Text scoreText;
         [SerializeField] private Text hpText;
         [SerializeField] private Slider bossHpSlider;
+        [SerializeField] private Slider bossDefenseSlider;
+        [SerializeField] private Slider chapterProgressSlider;
         [SerializeField] private GameObject pausePanel;
 
         private Text comboText;
         private Text announcementText;
+        private Text missionText;
+        private Text objectiveProgressText;
+        private Text bossStateText;
+        private Text bossWindowText;
+        private Text bossAttackModeText;
+        private Text bossAttackWarningText;
         private Text skillText;
         private Text loadoutText;
         private Text weaponLevelText;
@@ -37,8 +45,14 @@ namespace ThunderFighter.UI
         private Image hpPanel;
         private Image comboPanel;
         private Image announcementPanel;
+        private Image missionPanel;
         private Image bossPanel;
+        private Image bossStatePanel;
+        private Image bossWindowPanel;
+        private Image bossAttackModePanel;
+        private Image bossAttackWarningPanel;
         private Image skillPanel;
+        private Image pickupPanel;
         private Image scanlineOverlay;
         private readonly List<Image> bossSegmentMarkers = new List<Image>();
         private readonly List<Image> buffIcons = new List<Image>();
@@ -75,6 +89,10 @@ namespace ThunderFighter.UI
             GameEvents.OnThreatEdgePulse += HandleThreatEdgePulse;
             GameEvents.OnBossLockOnWarning += HandleBossLockOnWarning;
             GameEvents.OnBossLaserHit += HandleBossLaserHit;
+            GameEvents.OnBossDefenseStateChanged += HandleBossDefenseStateChanged;
+            GameEvents.OnTacticalProgressChanged += HandleTacticalProgressChanged;
+            GameEvents.OnBossAttackTelemetryChanged += HandleBossAttackTelemetryChanged;
+            GameEvents.OnBossPhaseTelemetryChanged += HandleBossPhaseTelemetryChanged;
             GameEvents.OnGameStateChanged += HandleGameStateChanged;
         }
 
@@ -94,6 +112,10 @@ namespace ThunderFighter.UI
             GameEvents.OnThreatEdgePulse -= HandleThreatEdgePulse;
             GameEvents.OnBossLockOnWarning -= HandleBossLockOnWarning;
             GameEvents.OnBossLaserHit -= HandleBossLaserHit;
+            GameEvents.OnBossDefenseStateChanged -= HandleBossDefenseStateChanged;
+            GameEvents.OnTacticalProgressChanged -= HandleTacticalProgressChanged;
+            GameEvents.OnBossAttackTelemetryChanged -= HandleBossAttackTelemetryChanged;
+            GameEvents.OnBossPhaseTelemetryChanged -= HandleBossPhaseTelemetryChanged;
             GameEvents.OnGameStateChanged -= HandleGameStateChanged;
         }
 
@@ -109,6 +131,18 @@ namespace ThunderFighter.UI
             HandleSkillEnergyChanged(1f, LocalizationService.IsChinese ? "K 新星 40  |  L 过载 60" : "K NOVA 40  |  L OVERDRIVE 60");
             HandleLoadoutChanged(LocalizationService.IsChinese ? "先锋型" : "VANGUARD", 1);
             HandleBuffStatusChanged(LocalizationService.IsChinese ? "无临时增幅" : "No active buffs", new PickupBuffType[0]);
+            if (missionText != null)
+            {
+                missionText.text = LocalizationService.IsChinese ? "战术目标: 清空当前空域威胁" : "TACTICAL: CLEAR HOSTILE AIRSPACE";
+            }
+            if (objectiveProgressText != null)
+            {
+                objectiveProgressText.text = LocalizationService.IsChinese ? "阶段 1 / 1" : "PHASE 1 / 1";
+            }
+            if (chapterProgressSlider != null)
+            {
+                chapterProgressSlider.value = 0f;
+            }
             if (pausePanel != null)
             {
                 pausePanel.SetActive(false);
@@ -145,16 +179,79 @@ namespace ThunderFighter.UI
 
             if (comboText == null)
             {
-                comboText = CreateRuntimeText(canvas.transform, "ComboText", ultraCompact ? new Vector2(0.84f, 0.84f) : new Vector2(0.86f, 0.86f), ultraCompact ? new Vector2(180f, 40f) : new Vector2(220f, 46f), ultraCompact ? 18 : 22, TextAnchor.MiddleRight);
+                comboText = CreateRuntimeText(canvas.transform, "ComboText", ultraCompact ? new Vector2(0.865f, 0.87f) : new Vector2(0.88f, 0.885f), ultraCompact ? new Vector2(180f, 34f) : new Vector2(220f, 38f), ultraCompact ? 16 : 18, TextAnchor.MiddleRight);
                 comboText.text = string.Empty;
                 comboPanel = EnsureBackingPanel(comboText, new Color(0.16f, 0.1f, 0.02f, 0f), new Vector2(18f, 10f));
             }
 
             if (announcementText == null)
             {
-                announcementText = CreateRuntimeText(canvas.transform, "AnnouncementText", ultraCompact ? new Vector2(0.5f, 0.76f) : new Vector2(0.5f, 0.79f), ultraCompact ? new Vector2(420f, 48f) : new Vector2(520f, 52f), ultraCompact ? 20 : 24, TextAnchor.MiddleCenter);
+                announcementText = CreateRuntimeText(canvas.transform, "AnnouncementText", ultraCompact ? new Vector2(0.5f, 0.77f) : new Vector2(0.5f, 0.805f), ultraCompact ? new Vector2(420f, 46f) : new Vector2(540f, 50f), ultraCompact ? 19 : 23, TextAnchor.MiddleCenter);
                 announcementText.text = string.Empty;
                 announcementPanel = EnsureBackingPanel(announcementText, new Color(0.2f, 0.12f, 0.04f, 0f), new Vector2(28f, 14f));
+            }
+
+            if (missionText == null)
+            {
+                missionText = CreateRuntimeText(canvas.transform, "MissionText", ultraCompact ? new Vector2(0.5f, 0.72f) : new Vector2(0.5f, 0.75f), ultraCompact ? new Vector2(450f, 28f) : new Vector2(560f, 30f), ultraCompact ? 12 : 14, TextAnchor.MiddleCenter);
+                missionText.color = new Color(0.72f, 0.88f, 0.98f, 0.84f);
+                missionPanel = EnsureBackingPanel(missionText, new Color(0.04f, 0.08f, 0.14f, 0.44f), new Vector2(20f, 10f));
+            }
+
+            if (objectiveProgressText == null)
+            {
+                objectiveProgressText = CreateRuntimeText(canvas.transform, "ObjectiveProgressText", ultraCompact ? new Vector2(0.5f, 0.69f) : new Vector2(0.5f, 0.715f), ultraCompact ? new Vector2(360f, 24f) : new Vector2(440f, 26f), ultraCompact ? 11 : 12, TextAnchor.MiddleCenter);
+                objectiveProgressText.color = new Color(1f, 0.88f, 0.62f, 0.82f);
+                EnsureBackingPanel(objectiveProgressText, new Color(0.1f, 0.08f, 0.04f, 0.38f), new Vector2(16f, 8f));
+            }
+
+            if (chapterProgressSlider == null)
+            {
+                GameObject root = new GameObject("ChapterProgressSlider");
+                root.transform.SetParent(canvas.transform, false);
+                RectTransform rect = root.AddComponent<RectTransform>();
+                rect.anchorMin = ultraCompact ? new Vector2(0.5f, 0.655f) : new Vector2(0.5f, 0.678f);
+                rect.anchorMax = ultraCompact ? new Vector2(0.5f, 0.655f) : new Vector2(0.5f, 0.678f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.sizeDelta = ultraCompact ? new Vector2(300f, 8f) : new Vector2(380f, 10f);
+
+                GameObject background = new GameObject("Background");
+                background.transform.SetParent(root.transform, false);
+                RectTransform bgRect = background.AddComponent<RectTransform>();
+                bgRect.anchorMin = Vector2.zero;
+                bgRect.anchorMax = Vector2.one;
+                bgRect.offsetMin = Vector2.zero;
+                bgRect.offsetMax = Vector2.zero;
+                Image bgImage = background.AddComponent<Image>();
+                bgImage.color = new Color(0.06f, 0.1f, 0.16f, 0.8f);
+
+                GameObject fillArea = new GameObject("Fill Area");
+                fillArea.transform.SetParent(root.transform, false);
+                RectTransform fillAreaRect = fillArea.AddComponent<RectTransform>();
+                fillAreaRect.anchorMin = new Vector2(0.02f, 0.16f);
+                fillAreaRect.anchorMax = new Vector2(0.98f, 0.84f);
+                fillAreaRect.offsetMin = Vector2.zero;
+                fillAreaRect.offsetMax = Vector2.zero;
+
+                GameObject fill = new GameObject("Fill");
+                fill.transform.SetParent(fillArea.transform, false);
+                RectTransform fillRect = fill.AddComponent<RectTransform>();
+                fillRect.anchorMin = Vector2.zero;
+                fillRect.anchorMax = Vector2.one;
+                fillRect.offsetMin = Vector2.zero;
+                fillRect.offsetMax = Vector2.zero;
+                Image fillImage = fill.AddComponent<Image>();
+                fillImage.color = new Color(0.52f, 0.9f, 1f, 0.96f);
+
+                chapterProgressSlider = root.AddComponent<Slider>();
+                chapterProgressSlider.transition = Selectable.Transition.None;
+                chapterProgressSlider.fillRect = fillRect;
+                chapterProgressSlider.targetGraphic = fillImage;
+                chapterProgressSlider.direction = Slider.Direction.LeftToRight;
+                chapterProgressSlider.minValue = 0f;
+                chapterProgressSlider.maxValue = 1f;
+                chapterProgressSlider.value = 0f;
+                EnsureBackingPanel(fillImage, new Color(0.04f, 0.08f, 0.14f, 0.38f), new Vector2(16f, 8f));
             }
 
             if (skillSlider == null)
@@ -162,10 +259,10 @@ namespace ThunderFighter.UI
                 GameObject root = new GameObject("SkillSlider");
                 root.transform.SetParent(canvas.transform, false);
                 RectTransform rect = root.AddComponent<RectTransform>();
-                rect.anchorMin = ultraCompact ? new Vector2(0.5f, 0.075f) : new Vector2(0.5f, 0.085f);
-                rect.anchorMax = ultraCompact ? new Vector2(0.5f, 0.075f) : new Vector2(0.5f, 0.085f);
+                rect.anchorMin = ultraCompact ? new Vector2(0.5f, 0.06f) : new Vector2(0.5f, 0.07f);
+                rect.anchorMax = ultraCompact ? new Vector2(0.5f, 0.06f) : new Vector2(0.5f, 0.07f);
                 rect.pivot = new Vector2(0.5f, 0.5f);
-                rect.sizeDelta = ultraCompact ? new Vector2(240f, 14f) : new Vector2(300f, 16f);
+                rect.sizeDelta = ultraCompact ? new Vector2(260f, 14f) : new Vector2(320f, 16f);
 
                 GameObject background = new GameObject("Background");
                 background.transform.SetParent(root.transform, false);
@@ -216,46 +313,46 @@ namespace ThunderFighter.UI
                 skillGlowOverlay.color = new Color(0.62f, 0.94f, 1f, 0.08f);
                 skillGlowOverlay.raycastTarget = false;
 
-                skillText = CreateRuntimeText(canvas.transform, "SkillText", ultraCompact ? new Vector2(0.5f, 0.038f) : new Vector2(0.5f, 0.045f), ultraCompact ? new Vector2(290f, 24f) : new Vector2(360f, 28f), ultraCompact ? 13 : 16, TextAnchor.MiddleCenter);
+                skillText = CreateRuntimeText(canvas.transform, "SkillText", ultraCompact ? new Vector2(0.5f, 0.028f) : new Vector2(0.5f, 0.036f), ultraCompact ? new Vector2(300f, 24f) : new Vector2(380f, 28f), ultraCompact ? 12 : 15, TextAnchor.MiddleCenter);
                 skillPanel = skillPanel ?? EnsureBackingPanel(skillText, new Color(0.04f, 0.08f, 0.16f, 0.78f), new Vector2(18f, 14f));
-                skillNovaIcon = CreateSkillIcon(canvas.transform, "NovaIcon", ultraCompact ? new Vector2(0.37f, 0.075f) : new Vector2(0.39f, 0.085f), GeneratedSpriteKind.Ring, new Color(0.52f, 0.9f, 1f, 0.92f));
-                skillOverdriveIcon = CreateSkillIcon(canvas.transform, "OverdriveIcon", ultraCompact ? new Vector2(0.63f, 0.075f) : new Vector2(0.61f, 0.085f), GeneratedSpriteKind.Thruster, new Color(1f, 0.82f, 0.36f, 0.92f));
+                skillNovaIcon = CreateSkillIcon(canvas.transform, "NovaIcon", ultraCompact ? new Vector2(0.35f, 0.06f) : new Vector2(0.375f, 0.07f), GeneratedSpriteKind.Ring, new Color(0.52f, 0.9f, 1f, 0.92f));
+                skillOverdriveIcon = CreateSkillIcon(canvas.transform, "OverdriveIcon", ultraCompact ? new Vector2(0.65f, 0.06f) : new Vector2(0.625f, 0.07f), GeneratedSpriteKind.Thruster, new Color(1f, 0.82f, 0.36f, 0.92f));
             }
 
             if (loadoutText == null)
             {
-                loadoutText = CreateRuntimeText(canvas.transform, "LoadoutText", ultraCompact ? new Vector2(0.16f, 0.90f) : new Vector2(0.16f, 0.915f), ultraCompact ? new Vector2(180f, 24f) : new Vector2(220f, 26f), ultraCompact ? 14 : 16, TextAnchor.MiddleLeft);
+                loadoutText = CreateRuntimeText(canvas.transform, "LoadoutText", ultraCompact ? new Vector2(0.14f, 0.85f) : new Vector2(0.135f, 0.855f), ultraCompact ? new Vector2(200f, 24f) : new Vector2(220f, 26f), ultraCompact ? 13 : 15, TextAnchor.MiddleLeft);
                 loadoutText.color = new Color(0.84f, 0.96f, 1f, 1f);
                 EnsureBackingPanel(loadoutText, new Color(0.04f, 0.08f, 0.16f, 0.72f), new Vector2(18f, 12f));
             }
 
             if (weaponLevelText == null)
             {
-                weaponLevelText = CreateRuntimeText(canvas.transform, "WeaponLevelText", ultraCompact ? new Vector2(0.16f, 0.865f) : new Vector2(0.16f, 0.88f), ultraCompact ? new Vector2(180f, 24f) : new Vector2(220f, 26f), ultraCompact ? 13 : 15, TextAnchor.MiddleLeft);
+                weaponLevelText = CreateRuntimeText(canvas.transform, "WeaponLevelText", ultraCompact ? new Vector2(0.14f, 0.815f) : new Vector2(0.135f, 0.815f), ultraCompact ? new Vector2(200f, 24f) : new Vector2(220f, 26f), ultraCompact ? 12 : 14, TextAnchor.MiddleLeft);
                 weaponLevelText.color = new Color(1f, 0.86f, 0.58f, 0.96f);
                 EnsureBackingPanel(weaponLevelText, new Color(0.1f, 0.08f, 0.04f, 0.7f), new Vector2(18f, 12f));
             }
 
             if (buffSummaryText == null)
             {
-                buffSummaryText = CreateRuntimeText(canvas.transform, "BuffSummaryText", ultraCompact ? new Vector2(0.78f, 0.12f) : new Vector2(0.79f, 0.12f), ultraCompact ? new Vector2(210f, 44f) : new Vector2(260f, 48f), ultraCompact ? 12 : 14, TextAnchor.MiddleRight);
+                buffSummaryText = CreateRuntimeText(canvas.transform, "BuffSummaryText", ultraCompact ? new Vector2(0.84f, 0.155f) : new Vector2(0.86f, 0.155f), ultraCompact ? new Vector2(210f, 36f) : new Vector2(260f, 40f), ultraCompact ? 11 : 13, TextAnchor.MiddleRight);
                 buffSummaryText.color = new Color(0.82f, 0.94f, 1f, 0.95f);
                 EnsureBackingPanel(buffSummaryText, new Color(0.04f, 0.08f, 0.16f, 0.72f), new Vector2(18f, 14f));
             }
 
             if (pickupText == null)
             {
-                pickupText = CreateRuntimeText(canvas.transform, "PickupText", ultraCompact ? new Vector2(0.5f, 0.17f) : new Vector2(0.5f, 0.18f), ultraCompact ? new Vector2(320f, 28f) : new Vector2(380f, 30f), ultraCompact ? 13 : 15, TextAnchor.MiddleCenter);
+                pickupText = CreateRuntimeText(canvas.transform, "PickupText", ultraCompact ? new Vector2(0.5f, 0.135f) : new Vector2(0.5f, 0.145f), ultraCompact ? new Vector2(320f, 28f) : new Vector2(380f, 30f), ultraCompact ? 13 : 15, TextAnchor.MiddleCenter);
                 pickupText.color = new Color(1f, 0.94f, 0.72f, 0f);
-                EnsureBackingPanel(pickupText, new Color(0.12f, 0.08f, 0.04f, 0f), new Vector2(22f, 12f));
+                pickupPanel = EnsureBackingPanel(pickupText, new Color(0.12f, 0.08f, 0.04f, 0f), new Vector2(22f, 12f));
             }
 
             if (buffIcons.Count == 0)
             {
-                float[] xs = ultraCompact ? new[] { 0.66f, 0.72f, 0.78f, 0.84f, 0.90f } : new[] { 0.68f, 0.735f, 0.79f, 0.845f, 0.90f };
+                float[] xs = ultraCompact ? new[] { 0.72f, 0.775f, 0.83f, 0.885f, 0.94f } : new[] { 0.72f, 0.775f, 0.83f, 0.885f, 0.94f };
                 for (int i = 0; i < xs.Length; i++)
                 {
-                    buffIcons.Add(CreateSkillIcon(canvas.transform, "BuffIcon_" + i, new Vector2(xs[i], ultraCompact ? 0.085f : 0.09f), GeneratedSpriteKind.Engine, new Color(0.5f, 0.74f, 0.9f, 0f)));
+                    buffIcons.Add(CreateSkillIcon(canvas.transform, "BuffIcon_" + i, new Vector2(xs[i], ultraCompact ? 0.095f : 0.105f), GeneratedSpriteKind.Engine, new Color(0.5f, 0.74f, 0.9f, 0f)));
                 }
             }
 
@@ -331,6 +428,87 @@ namespace ThunderFighter.UI
             {
                 BuildBossLockUi(canvas.transform);
             }
+
+            if (bossStateText == null)
+            {
+                bossStateText = CreateRuntimeText(canvas.transform, "BossStateText", ultraCompact ? new Vector2(0.5f, 0.875f) : new Vector2(0.5f, 0.89f), ultraCompact ? new Vector2(340f, 24f) : new Vector2(420f, 26f), ultraCompact ? 12 : 14, TextAnchor.MiddleCenter);
+                bossStateText.color = new Color(1f, 0.88f, 0.62f, 0f);
+                bossStatePanel = EnsureBackingPanel(bossStateText, new Color(0.12f, 0.08f, 0.04f, 0f), new Vector2(18f, 10f));
+            }
+
+            if (bossDefenseSlider == null)
+            {
+                GameObject root = new GameObject("BossDefenseSlider");
+                root.transform.SetParent(canvas.transform, false);
+                RectTransform rect = root.AddComponent<RectTransform>();
+                rect.anchorMin = ultraCompact ? new Vector2(0.5f, 0.855f) : new Vector2(0.5f, 0.868f);
+                rect.anchorMax = ultraCompact ? new Vector2(0.5f, 0.855f) : new Vector2(0.5f, 0.868f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.sizeDelta = ultraCompact ? new Vector2(260f, 10f) : new Vector2(320f, 12f);
+
+                GameObject background = new GameObject("Background");
+                background.transform.SetParent(root.transform, false);
+                RectTransform bgRect = background.AddComponent<RectTransform>();
+                bgRect.anchorMin = Vector2.zero;
+                bgRect.anchorMax = Vector2.one;
+                bgRect.offsetMin = Vector2.zero;
+                bgRect.offsetMax = Vector2.zero;
+                Image bgImage = background.AddComponent<Image>();
+                bgImage.color = new Color(0.08f, 0.11f, 0.18f, 0.88f);
+
+                GameObject fillArea = new GameObject("Fill Area");
+                fillArea.transform.SetParent(root.transform, false);
+                RectTransform fillAreaRect = fillArea.AddComponent<RectTransform>();
+                fillAreaRect.anchorMin = new Vector2(0.02f, 0.12f);
+                fillAreaRect.anchorMax = new Vector2(0.98f, 0.88f);
+                fillAreaRect.offsetMin = Vector2.zero;
+                fillAreaRect.offsetMax = Vector2.zero;
+
+                GameObject fill = new GameObject("Fill");
+                fill.transform.SetParent(fillArea.transform, false);
+                RectTransform fillRect = fill.AddComponent<RectTransform>();
+                fillRect.anchorMin = Vector2.zero;
+                fillRect.anchorMax = Vector2.one;
+                fillRect.offsetMin = Vector2.zero;
+                fillRect.offsetMax = Vector2.zero;
+                Image fillImage = fill.AddComponent<Image>();
+                fillImage.color = new Color(0.54f, 0.88f, 1f, 1f);
+
+                bossDefenseSlider = root.AddComponent<Slider>();
+                bossDefenseSlider.transition = Selectable.Transition.None;
+                bossDefenseSlider.fillRect = fillRect;
+                bossDefenseSlider.targetGraphic = fillImage;
+                bossDefenseSlider.direction = Slider.Direction.LeftToRight;
+                bossDefenseSlider.minValue = 0f;
+                bossDefenseSlider.maxValue = 1f;
+                bossDefenseSlider.value = 1f;
+                Image defensePanel = EnsureBackingPanel(fillImage, new Color(0.04f, 0.08f, 0.16f, 0f), new Vector2(16f, 10f));
+                if (defensePanel != null)
+                {
+                    defensePanel.gameObject.SetActive(false);
+                }
+            }
+
+            if (bossWindowText == null)
+            {
+                bossWindowText = CreateRuntimeText(canvas.transform, "BossWindowText", ultraCompact ? new Vector2(0.5f, 0.835f) : new Vector2(0.5f, 0.845f), ultraCompact ? new Vector2(280f, 22f) : new Vector2(320f, 24f), ultraCompact ? 11 : 12, TextAnchor.MiddleCenter);
+                bossWindowText.color = new Color(1f, 0.9f, 0.66f, 0f);
+                bossWindowPanel = EnsureBackingPanel(bossWindowText, new Color(0.12f, 0.08f, 0.04f, 0f), new Vector2(16f, 8f));
+            }
+
+            if (bossAttackModeText == null)
+            {
+                bossAttackModeText = CreateRuntimeText(canvas.transform, "BossAttackModeText", ultraCompact ? new Vector2(0.5f, 0.807f) : new Vector2(0.5f, 0.818f), ultraCompact ? new Vector2(300f, 22f) : new Vector2(360f, 24f), ultraCompact ? 11 : 12, TextAnchor.MiddleCenter);
+                bossAttackModeText.color = new Color(0.76f, 0.92f, 1f, 0f);
+                bossAttackModePanel = EnsureBackingPanel(bossAttackModeText, new Color(0.06f, 0.1f, 0.16f, 0f), new Vector2(16f, 8f));
+            }
+
+            if (bossAttackWarningText == null)
+            {
+                bossAttackWarningText = CreateRuntimeText(canvas.transform, "BossAttackWarningText", ultraCompact ? new Vector2(0.5f, 0.78f) : new Vector2(0.5f, 0.79f), ultraCompact ? new Vector2(340f, 22f) : new Vector2(400f, 24f), ultraCompact ? 11 : 12, TextAnchor.MiddleCenter);
+                bossAttackWarningText.color = new Color(1f, 0.86f, 0.62f, 0f);
+                bossAttackWarningPanel = EnsureBackingPanel(bossAttackWarningText, new Color(0.12f, 0.08f, 0.04f, 0f), new Vector2(16f, 8f));
+            }
         }
 
         private void StyleHud()
@@ -342,19 +520,21 @@ namespace ThunderFighter.UI
             if (scoreText != null)
             {
                 RectTransform scoreRect = scoreText.rectTransform;
-                scoreRect.anchorMin = ultraCompact ? new Vector2(0.14f, 0.945f) : new Vector2(0.12f, 0.95f);
-                scoreRect.anchorMax = ultraCompact ? new Vector2(0.14f, 0.945f) : new Vector2(0.12f, 0.95f);
+                scoreRect.anchorMin = ultraCompact ? new Vector2(0.86f, 0.945f) : new Vector2(0.88f, 0.95f);
+                scoreRect.anchorMax = ultraCompact ? new Vector2(0.86f, 0.945f) : new Vector2(0.88f, 0.95f);
                 scoreRect.pivot = new Vector2(0.5f, 0.5f);
                 scoreRect.sizeDelta = ultraCompact ? new Vector2(220f, 40f) : new Vector2(260f, 44f);
+                scoreText.alignment = TextAnchor.MiddleRight;
             }
 
             if (hpText != null)
             {
                 RectTransform hpRect = hpText.rectTransform;
-                hpRect.anchorMin = ultraCompact ? new Vector2(0.14f, 0.895f) : new Vector2(0.12f, 0.90f);
-                hpRect.anchorMax = ultraCompact ? new Vector2(0.14f, 0.895f) : new Vector2(0.12f, 0.90f);
+                hpRect.anchorMin = ultraCompact ? new Vector2(0.14f, 0.945f) : new Vector2(0.12f, 0.95f);
+                hpRect.anchorMax = ultraCompact ? new Vector2(0.14f, 0.945f) : new Vector2(0.12f, 0.95f);
                 hpRect.pivot = new Vector2(0.5f, 0.5f);
                 hpRect.sizeDelta = ultraCompact ? new Vector2(220f, 40f) : new Vector2(260f, 44f);
+                hpText.alignment = TextAnchor.MiddleLeft;
             }
 
             if (bossHpSlider != null)
@@ -365,7 +545,7 @@ namespace ThunderFighter.UI
                     bossRect.anchorMin = ultraCompact ? new Vector2(0.5f, 0.915f) : new Vector2(0.5f, 0.93f);
                     bossRect.anchorMax = ultraCompact ? new Vector2(0.5f, 0.915f) : new Vector2(0.5f, 0.93f);
                     bossRect.pivot = new Vector2(0.5f, 0.5f);
-                    bossRect.sizeDelta = ultraCompact ? new Vector2(400f, 18f) : (compact ? new Vector2(460f, 20f) : new Vector2(520f, 20f));
+                    bossRect.sizeDelta = ultraCompact ? new Vector2(380f, 18f) : (compact ? new Vector2(450f, 20f) : new Vector2(520f, 20f));
                 }
             }
 
@@ -677,7 +857,7 @@ namespace ThunderFighter.UI
             comboText.text = LocalizationService.IsChinese ? string.Format("连击 x{0:0.0}", multiplier) : string.Format("COMBO x{0:0.0}", multiplier);
             if (comboPanel != null)
             {
-                comboPanel.color = new Color(0.16f, 0.1f, 0.02f, 0.76f);
+                comboPanel.color = new Color(0.16f, 0.1f, 0.02f, 0.62f);
             }
 
             if (comboRoutine != null)
@@ -685,7 +865,7 @@ namespace ThunderFighter.UI
                 StopCoroutine(comboRoutine);
             }
 
-            comboRoutine = StartCoroutine(PulseText(comboText, new Color(1f, 0.9f, 0.35f, 1f), 1.16f, 0.24f));
+            comboRoutine = StartCoroutine(PulseText(comboText, new Color(1f, 0.9f, 0.35f, 1f), 1.12f, 0.2f));
         }
 
         private void HandleBossHpChanged(float ratio)
@@ -711,11 +891,52 @@ namespace ThunderFighter.UI
             {
                 lastBossRatio = 1f;
                 bossHpSlider.value = 0f;
+                if (bossStateText != null)
+                {
+                    bossStateText.text = string.Empty;
+                    bossStateText.color = new Color(bossStateText.color.r, bossStateText.color.g, bossStateText.color.b, 0f);
+                }
+                if (bossStatePanel != null)
+                {
+                    bossStatePanel.color = new Color(bossStatePanel.color.r, bossStatePanel.color.g, bossStatePanel.color.b, 0f);
+                }
+                if (bossDefenseSlider != null)
+                {
+                    bossDefenseSlider.gameObject.SetActive(false);
+                }
+                if (bossWindowText != null)
+                {
+                    bossWindowText.text = string.Empty;
+                    bossWindowText.color = new Color(bossWindowText.color.r, bossWindowText.color.g, bossWindowText.color.b, 0f);
+                }
+                if (bossWindowPanel != null)
+                {
+                    bossWindowPanel.color = new Color(bossWindowPanel.color.r, bossWindowPanel.color.g, bossWindowPanel.color.b, 0f);
+                }
+                if (bossAttackModeText != null)
+                {
+                    bossAttackModeText.text = string.Empty;
+                    bossAttackModeText.color = new Color(bossAttackModeText.color.r, bossAttackModeText.color.g, bossAttackModeText.color.b, 0f);
+                }
+                if (bossAttackModePanel != null)
+                {
+                    bossAttackModePanel.color = new Color(bossAttackModePanel.color.r, bossAttackModePanel.color.g, bossAttackModePanel.color.b, 0f);
+                }
+                if (bossAttackWarningText != null)
+                {
+                    bossAttackWarningText.text = string.Empty;
+                    bossAttackWarningText.color = new Color(bossAttackWarningText.color.r, bossAttackWarningText.color.g, bossAttackWarningText.color.b, 0f);
+                }
+                if (bossAttackWarningPanel != null)
+                {
+                    bossAttackWarningPanel.color = new Color(bossAttackWarningPanel.color.r, bossAttackWarningPanel.color.g, bossAttackWarningPanel.color.b, 0f);
+                }
                 return;
             }
 
             bossHpSlider.value = ratio;
             UpdateBossFillVisual(ratio);
+            UpdateBossStateText(ratio);
 
             if ((lastBossRatio > 0.7f && ratio <= 0.7f) || (lastBossRatio > 0.4f && ratio <= 0.4f))
             {
@@ -792,12 +1013,12 @@ namespace ThunderFighter.UI
         {
             if (loadoutText != null)
             {
-                loadoutText.text = LocalizationService.IsChinese ? $"机型: {shipName}" : $"FRAME: {shipName}";
+                loadoutText.text = LocalizationService.IsChinese ? $"机型  {shipName}" : $"FRAME  {shipName}";
             }
 
             if (weaponLevelText != null)
             {
-                weaponLevelText.text = LocalizationService.IsChinese ? $"火力等级: Lv.{weaponLevel}" : $"WEAPON LEVEL: Lv.{weaponLevel}";
+                weaponLevelText.text = LocalizationService.IsChinese ? $"火力等级  Lv.{weaponLevel}" : $"WEAPON LEVEL  Lv.{weaponLevel}";
             }
         }
 
@@ -805,7 +1026,9 @@ namespace ThunderFighter.UI
         {
             if (buffSummaryText != null)
             {
-                buffSummaryText.text = summary;
+                bool hasBuffs = activeTypes != null && activeTypes.Length > 0;
+                buffSummaryText.text = hasBuffs ? summary : string.Empty;
+                buffSummaryText.color = new Color(0.82f, 0.94f, 1f, hasBuffs ? 0.95f : 0f);
             }
 
             for (int i = 0; i < buffIcons.Count; i++)
@@ -830,6 +1053,10 @@ namespace ThunderFighter.UI
 
             pickupText.text = label;
             pickupText.color = new Color(1f, 0.94f, 0.72f, 1f);
+            if (pickupPanel != null)
+            {
+                pickupPanel.color = new Color(0.12f, 0.08f, 0.04f, 0.7f);
+            }
             StartCoroutine(FadePickupText());
         }
 
@@ -868,6 +1095,160 @@ namespace ThunderFighter.UI
             }
 
             laserHitRoutine = StartCoroutine(FlashLaserBurn(Mathf.Clamp01(intensity)));
+        }
+
+        private void HandleBossDefenseStateChanged(bool shieldActive, float normalizedValue, string stateLabel, float timerRemaining)
+        {
+            if (bossStateText == null)
+            {
+                return;
+            }
+
+            string localized = LocalizationService.TranslateLiteral(stateLabel);
+            bossStateText.text = shieldActive
+                ? string.Format(LocalizationService.IsChinese ? "Boss 防御: {0}  {1:0%}" : "BOSS DEFENSE: {0}  {1:0%}", localized, normalizedValue)
+                : string.Format(LocalizationService.IsChinese ? "Boss 核心: {0}" : "BOSS CORE: {0}", localized);
+            bossStateText.color = shieldActive ? new Color(0.72f, 0.9f, 1f, 0.96f) : new Color(1f, 0.9f, 0.66f, 0.96f);
+
+            if (bossStatePanel != null)
+            {
+                bossStatePanel.color = shieldActive
+                    ? new Color(0.06f, 0.1f, 0.16f, 0.72f)
+                    : new Color(0.12f, 0.08f, 0.04f, 0.78f);
+            }
+
+            if (bossDefenseSlider != null)
+            {
+                bossDefenseSlider.gameObject.SetActive(true);
+                bossDefenseSlider.value = normalizedValue;
+                if (bossDefenseSlider.fillRect != null)
+                {
+                    Image fill = bossDefenseSlider.fillRect.GetComponent<Image>();
+                    if (fill != null)
+                    {
+                        fill.color = shieldActive
+                            ? Color.Lerp(new Color(0.24f, 0.66f, 0.9f, 1f), new Color(0.58f, 0.92f, 1f, 1f), normalizedValue)
+                            : new Color(1f, 0.78f, 0.38f, 1f);
+                    }
+                }
+                Transform panel = bossDefenseSlider.transform.parent != null ? bossDefenseSlider.transform.parent.Find("Fill_Panel") : null;
+                if (panel != null)
+                {
+                    panel.gameObject.SetActive(true);
+                }
+            }
+
+            if (bossWindowText != null)
+            {
+                if (shieldActive)
+                {
+                    bossWindowText.text = LocalizationService.IsChinese ? "核心窗口: 待触发" : "CORE WINDOW: LOCKED";
+                    bossWindowText.color = new Color(0.72f, 0.9f, 1f, 0.82f);
+                    if (bossWindowPanel != null)
+                    {
+                        bossWindowPanel.color = new Color(0.06f, 0.1f, 0.16f, 0.56f);
+                    }
+                }
+                else
+                {
+                    bossWindowText.text = LocalizationService.IsChinese
+                        ? $"脆弱窗口剩余: {timerRemaining:0.0}s"
+                        : $"VULNERABLE WINDOW: {timerRemaining:0.0}s";
+                    bossWindowText.color = new Color(1f, 0.9f, 0.66f, 0.96f);
+                    if (bossWindowPanel != null)
+                    {
+                        bossWindowPanel.color = new Color(0.12f, 0.08f, 0.04f, 0.74f);
+                    }
+                }
+            }
+        }
+
+        private void HandleTacticalProgressChanged(string objectiveLabel, int phaseIndex, int phaseCount, float phaseProgress, int remainingEnemies, int totalEnemies)
+        {
+            if (missionText != null)
+            {
+                missionText.text = LocalizationService.IsChinese
+                    ? $"战术目标: {LocalizationService.TranslateLiteral(objectiveLabel)}"
+                    : $"TACTICAL: {LocalizationService.TranslateLiteral(objectiveLabel)}";
+            }
+
+            if (objectiveProgressText != null)
+            {
+                string phaseLabel = LocalizationService.IsChinese
+                    ? $"阶段 {Mathf.Max(1, phaseIndex)} / {Mathf.Max(1, phaseCount)}"
+                    : $"PHASE {Mathf.Max(1, phaseIndex)} / {Mathf.Max(1, phaseCount)}";
+                string remainingLabel = totalEnemies > 0
+                    ? (LocalizationService.IsChinese
+                        ? $"剩余敌机 {remainingEnemies}/{totalEnemies}"
+                        : $"HOSTILES {remainingEnemies}/{totalEnemies}")
+                    : (LocalizationService.IsChinese ? "Boss 阶段" : "BOSS STAGE");
+                objectiveProgressText.text = string.Format("{0}   {1:0%}   {2}", phaseLabel, Mathf.Clamp01(phaseProgress), remainingLabel);
+            }
+
+            if (chapterProgressSlider != null)
+            {
+                float normalizedChapterProgress = Mathf.Clamp01(((Mathf.Max(1, phaseIndex) - 1f) + Mathf.Clamp01(phaseProgress)) / Mathf.Max(1f, phaseCount));
+                chapterProgressSlider.value = normalizedChapterProgress;
+                if (chapterProgressSlider.fillRect != null)
+                {
+                    Image fill = chapterProgressSlider.fillRect.GetComponent<Image>();
+                    if (fill != null)
+                    {
+                        fill.color = Color.Lerp(new Color(0.34f, 0.72f, 0.94f, 0.96f), new Color(1f, 0.78f, 0.42f, 0.96f), normalizedChapterProgress);
+                    }
+                }
+            }
+        }
+
+        private void HandleBossAttackTelemetryChanged(string currentModeLabel, string nextModeLabel, float etaSeconds)
+        {
+            if (bossAttackModeText != null)
+            {
+                bossAttackModeText.text = LocalizationService.IsChinese
+                    ? $"当前模式: {LocalizationService.TranslateLiteral(currentModeLabel)}"
+                    : $"CURRENT PATTERN: {LocalizationService.TranslateLiteral(currentModeLabel).ToUpperInvariant()}";
+                bossAttackModeText.color = new Color(0.76f, 0.92f, 1f, 0.94f);
+            }
+
+            if (bossAttackModePanel != null)
+            {
+                bossAttackModePanel.color = new Color(0.06f, 0.1f, 0.16f, 0.68f);
+            }
+
+            if (bossAttackWarningText != null)
+            {
+                bossAttackWarningText.text = LocalizationService.IsChinese
+                    ? $"下一次大招: {LocalizationService.TranslateLiteral(nextModeLabel)}  {etaSeconds:0.0}s"
+                    : $"NEXT MAJOR: {LocalizationService.TranslateLiteral(nextModeLabel).ToUpperInvariant()}  {etaSeconds:0.0}s";
+                bossAttackWarningText.color = etaSeconds <= 1.2f ? new Color(1f, 0.8f, 0.52f, 0.98f) : new Color(1f, 0.88f, 0.62f, 0.88f);
+            }
+
+            if (bossAttackWarningPanel != null)
+            {
+                bossAttackWarningPanel.color = etaSeconds <= 1.2f
+                    ? new Color(0.18f, 0.08f, 0.04f, 0.82f)
+                    : new Color(0.12f, 0.08f, 0.04f, 0.68f);
+            }
+        }
+
+        private void HandleBossPhaseTelemetryChanged(string phaseLabel, string moduleLabel, bool transitionLocked)
+        {
+            if (bossWindowText != null)
+            {
+                bossWindowText.text = LocalizationService.IsChinese
+                    ? $"{LocalizationService.TranslateLiteral(phaseLabel)}  |  {LocalizationService.TranslateLiteral(moduleLabel)}"
+                    : $"{LocalizationService.TranslateLiteral(phaseLabel).ToUpperInvariant()}  |  {LocalizationService.TranslateLiteral(moduleLabel).ToUpperInvariant()}";
+                bossWindowText.color = transitionLocked
+                    ? new Color(1f, 0.8f, 0.48f, 0.98f)
+                    : new Color(0.84f, 0.96f, 1f, 0.94f);
+            }
+
+            if (bossWindowPanel != null)
+            {
+                bossWindowPanel.color = transitionLocked
+                    ? new Color(0.18f, 0.08f, 0.04f, 0.84f)
+                    : new Color(0.04f, 0.08f, 0.16f, 0.68f);
+            }
         }
 
         private void UpdateBossFillVisual(float ratio)
@@ -912,6 +1293,14 @@ namespace ThunderFighter.UI
 
             string localizedMessage = LocalizationService.TranslateLiteral(message);
             announcementText.text = localizedMessage;
+            if (missionText != null)
+            {
+                bool highPriority = localizedMessage.Contains("WARNING") || localizedMessage.Contains("警告") || localizedMessage.Contains("BOSS") || localizedMessage.Contains("Boss");
+                if (!highPriority)
+                {
+                    missionText.text = LocalizationService.IsChinese ? $"战术目标: {localizedMessage}" : $"TACTICAL: {localizedMessage}";
+                }
+            }
             if (announcementPanel != null)
             {
                 announcementPanel.color = localizedMessage.Contains("WARNING") || localizedMessage.Contains("警告") ? new Color(0.26f, 0.1f, 0.02f, 0.84f) : new Color(0.18f, 0.1f, 0.03f, 0.78f);
@@ -991,7 +1380,40 @@ namespace ThunderFighter.UI
                 {
                     pickupText.color = new Color(1f, 0.94f, 0.72f, Mathf.Lerp(1f, 0f, t));
                 }
+                if (pickupPanel != null)
+                {
+                    pickupPanel.color = new Color(0.12f, 0.08f, 0.04f, Mathf.Lerp(0.7f, 0f, t));
+                }
                 yield return null;
+            }
+        }
+
+        private void UpdateBossStateText(float ratio)
+        {
+            if (bossStateText == null)
+            {
+                return;
+            }
+
+            string label;
+            if (ratio <= 0.4f)
+            {
+                label = LocalizationService.IsChinese ? "Boss 状态: 终局压制" : "BOSS STATUS: FINAL ASSAULT";
+            }
+            else if (ratio <= 0.7f)
+            {
+                label = LocalizationService.IsChinese ? "Boss 状态: 二阶段突破" : "BOSS STATUS: PHASE TWO";
+            }
+            else
+            {
+                label = LocalizationService.IsChinese ? "Boss 状态: 交战中" : "BOSS STATUS: ENGAGED";
+            }
+
+            bossStateText.text = label;
+            bossStateText.color = new Color(1f, 0.88f, 0.62f, 0.95f);
+            if (bossStatePanel != null)
+            {
+                bossStatePanel.color = new Color(0.12f, 0.08f, 0.04f, 0.72f);
             }
         }
 

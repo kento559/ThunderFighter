@@ -50,6 +50,7 @@ namespace ThunderFighter.Player
         private int activeSkillDamageBonus;
         private float activeSkillDamageMultiplier = 1f;
         private float activeMoveSpeedMultiplier = 1f;
+        private float currentVisualTilt;
 
         public ShipDefinition SelectedShip => selectedShip;
         public ShipId CurrentShipId => selectedShip != null ? selectedShip.ShipId : ShipId.Balanced;
@@ -606,14 +607,15 @@ namespace ThunderFighter.Player
                 return;
             }
 
-            float normalizedX = currentMoveSpeed > 0.01f ? actualMove.x / currentMoveSpeed : moveInput.x;
-            float tilt = Mathf.Lerp(0f, -18f, Mathf.Clamp(normalizedX, -1f, 1f));
+            float normalizedX = Mathf.Clamp(moveInput.x, -1f, 1f);
+            float tilt = -normalizedX * 18f;
             if (isDashing)
             {
                 tilt += -dashDirection.x * 10f;
             }
 
-            proceduralShipVisual.SetVisualTilt(tilt);
+            currentVisualTilt = Mathf.Lerp(currentVisualTilt, tilt, 12f * Time.deltaTime);
+            proceduralShipVisual.SetVisualTilt(currentVisualTilt);
             float boost = isDashing ? 1f : Mathf.Clamp01(actualMove.magnitude / Mathf.Max(0.01f, currentMoveSpeed));
             if (Time.time < fireFeedbackUntil)
             {

@@ -6,7 +6,10 @@ namespace ThunderFighter.Config
     {
         Auto = 0,
         Straight = 1,
-        Strafe = 2
+        Strafe = 2,
+        Flank = 3,
+        Dive = 4,
+        Support = 5
     }
 
     [CreateAssetMenu(menuName = "ThunderFighter/Config/EnemyConfig", fileName = "EnemyConfig")]

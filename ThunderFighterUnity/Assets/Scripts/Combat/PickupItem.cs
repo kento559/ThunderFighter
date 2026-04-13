@@ -14,6 +14,16 @@ namespace ThunderFighter.Combat
         private float spawnTime;
         private Vector3 origin;
         private float magnetRadius = 1.8f;
+        private float descentSpeed = 1.08f;
+        private float driftAmplitude = 0.12f;
+        private float initialBurstSpeed = 1.4f;
+        private float initialBurstDuration = 0.22f;
+        private float initialBurstAngle;
+        private float homingBaseSpeed = 9.5f;
+        private float homingBoostSpeed = 15f;
+        private float trailInterval = 0.026f;
+        private bool bossDrop;
+        private bool premiumDrop;
         private SpriteRenderer iconRenderer;
         private Transform outerRing;
         private Transform innerRing;
@@ -26,6 +36,7 @@ namespace ThunderFighter.Combat
             definition = pickupDefinition;
             spawnTime = Time.time;
             origin = transform.position;
+            initialBurstAngle = Random.Range(-42f, 42f);
             trigger = GetComponent<CircleCollider2D>();
             trigger.isTrigger = true;
             trigger.radius = 0.32f;
@@ -50,6 +61,33 @@ namespace ThunderFighter.Combat
             ApplyPickupPresentation();
         }
 
+        public void ConfigureFlightProfile(bool isBossDrop, bool isPremiumDrop)
+        {
+            bossDrop = isBossDrop;
+            premiumDrop = isPremiumDrop;
+
+            if (bossDrop)
+            {
+                initialBurstSpeed = 2.2f;
+                initialBurstDuration = 0.28f;
+                descentSpeed = 0.72f;
+                homingBaseSpeed = 12.5f;
+                homingBoostSpeed = 20.5f;
+                trailInterval = 0.018f;
+                magnetRadius = Mathf.Max(magnetRadius, 2.5f);
+            }
+            else if (premiumDrop)
+            {
+                initialBurstSpeed = 1.9f;
+                initialBurstDuration = 0.24f;
+                descentSpeed = 0.88f;
+                homingBaseSpeed = 11.2f;
+                homingBoostSpeed = 18.5f;
+                trailInterval = 0.022f;
+                magnetRadius = Mathf.Max(magnetRadius, 2.3f);
+            }
+        }
+
         private void Update()
         {
             if (definition == null)
@@ -63,10 +101,22 @@ namespace ThunderFighter.Combat
                 cachedPlayer = Object.FindFirstObjectByType<PlayerController>();
             }
 
-            float bob = Mathf.Sin((Time.time - spawnTime) * 4.2f) * 0.12f;
-            transform.position = new Vector3(transform.position.x, transform.position.y - Time.deltaTime * 0.8f, 0f);
-            transform.position = new Vector3(transform.position.x, origin.y + bob - (Time.time - spawnTime) * 0.8f, 0f);
-            transform.Rotate(0f, 0f, 28f * Time.deltaTime);
+            float age = Time.time - spawnTime;
+            float bob = Mathf.Sin(age * 4.2f) * 0.12f;
+            float drift = Mathf.Sin(age * 2.6f + initialBurstAngle * Mathf.Deg2Rad) * driftAmplitude;
+
+            if (age < initialBurstDuration)
+            {
+                float t = age / Mathf.Max(0.01f, initialBurstDuration);
+                Vector2 burstDir = Quaternion.Euler(0f, 0f, initialBurstAngle) * Vector2.up;
+                transform.position += (Vector3)(burstDir * initialBurstSpeed * (1f - t)) * Time.deltaTime;
+            }
+            else
+            {
+                transform.position = new Vector3(origin.x + drift, origin.y + bob - (age - initialBurstDuration) * descentSpeed, 0f);
+            }
+
+            transform.Rotate(0f, 0f, bossDrop ? 48f * Time.deltaTime : 32f * Time.deltaTime);
             UpdateRings();
 
             if (cachedPlayer != null)
@@ -77,11 +127,23 @@ namespace ThunderFighter.Combat
                 {
                     if (Time.time >= nextTrailAt)
                     {
-                        nextTrailAt = Time.time + 0.035f;
-                        SpawnAttractTrail(cachedPlayer.transform.position);
+                        nextTrailAt = Time.time + trailInterval;
+                        SpawnAttractTrail(cachedPlayer.transform.position, distance, radius);
                     }
 
-                    transform.position = Vector3.MoveTowards(transform.position, cachedPlayer.transform.position, Time.deltaTime * (6f + radius * 2.4f));
+                    float proximity = 1f - Mathf.Clamp01(distance / Mathf.Max(0.01f, radius));
+                    float targetSpeed = Mathf.Lerp(homingBaseSpeed, homingBoostSpeed, proximity * proximity);
+                    if (definition.Kind == PickupKind.WeaponLevel)
+                    {
+                        targetSpeed *= 1.18f;
+                    }
+
+                    if (bossDrop)
+                    {
+                        targetSpeed *= 1.12f;
+                    }
+
+                    transform.position = Vector3.MoveTowards(transform.position, cachedPlayer.transform.position, Time.deltaTime * targetSpeed);
                 }
             }
 
@@ -139,14 +201,20 @@ namespace ThunderFighter.Combat
 
             Vector3 iconScale = definition.Kind switch
             {
-                PickupKind.WeaponLevel => new Vector3(0.7f, 0.7f, 1f),
+                PickupKind.WeaponLevel => new Vector3(0.72f, 0.72f, 1f),
                 PickupKind.Repair => new Vector3(0.62f, 0.62f, 1f),
                 PickupKind.SkillEnergy => new Vector3(0.64f, 0.64f, 1f),
                 _ => new Vector3(0.58f, 0.58f, 1f)
             };
 
             transform.localScale = iconScale;
-            magnetRadius = definition.Kind == PickupKind.WeaponLevel ? 2.1f : 1.8f;
+            magnetRadius = definition.Kind == PickupKind.WeaponLevel ? 2.45f : 2f;
+            if (definition.Kind == PickupKind.WeaponLevel)
+            {
+                homingBaseSpeed = 11.8f;
+                homingBoostSpeed = 19.8f;
+                trailInterval = 0.02f;
+            }
         }
 
         private void UpdateRings()
@@ -154,21 +222,21 @@ namespace ThunderFighter.Combat
             float t = Time.time - spawnTime;
             if (outerRing != null)
             {
-                outerRing.Rotate(0f, 0f, 82f * Time.deltaTime);
-                float outerScale = 0.92f + Mathf.Sin(t * 3.4f) * 0.06f;
+                outerRing.Rotate(0f, 0f, bossDrop ? 122f * Time.deltaTime : 96f * Time.deltaTime);
+                float outerScale = (bossDrop ? 1.02f : 0.92f) + Mathf.Sin(t * 3.4f) * 0.08f;
                 outerRing.localScale = new Vector3(outerScale, outerScale, 1f);
             }
 
             if (innerRing != null)
             {
-                innerRing.Rotate(0f, 0f, -126f * Time.deltaTime);
-                float innerScale = 0.66f + Mathf.Sin(t * 5.2f + 0.9f) * 0.05f;
+                innerRing.Rotate(0f, 0f, bossDrop ? -182f * Time.deltaTime : -148f * Time.deltaTime);
+                float innerScale = (bossDrop ? 0.76f : 0.66f) + Mathf.Sin(t * 5.2f + 0.9f) * 0.06f;
                 innerRing.localScale = new Vector3(innerScale, innerScale, 1f);
             }
 
             if (badge != null)
             {
-                badge.localScale = Vector3.one * (0.42f + Mathf.Sin(t * 4.6f) * 0.03f);
+                badge.localScale = Vector3.one * ((bossDrop ? 0.48f : 0.42f) + Mathf.Sin(t * 4.6f) * 0.04f);
             }
         }
 
@@ -211,7 +279,7 @@ namespace ThunderFighter.Combat
             Object.Destroy(temp, Mathf.Max(clip.length, 0.3f));
         }
 
-        private void SpawnAttractTrail(Vector3 targetPosition)
+        private void SpawnAttractTrail(Vector3 targetPosition, float distance, float radius)
         {
             Vector3 delta = targetPosition - transform.position;
             float length = delta.magnitude;
@@ -220,18 +288,19 @@ namespace ThunderFighter.Combat
                 return;
             }
 
+            float proximity = 1f - Mathf.Clamp01(distance / Mathf.Max(0.01f, radius));
             GameObject trail = new GameObject("_PickupAttractTrail");
             trail.transform.position = transform.position + delta * 0.5f;
             trail.transform.rotation = Quaternion.FromToRotation(Vector3.up, delta.normalized);
             SpriteRenderer renderer = trail.AddComponent<SpriteRenderer>();
             renderer.sprite = GeneratedSpriteLibrary.Get(GeneratedSpriteKind.Bullet);
-            renderer.color = new Color(definition.AccentColor.r, definition.AccentColor.g, definition.AccentColor.b, 0.34f);
+            renderer.color = new Color(definition.AccentColor.r, definition.AccentColor.g, definition.AccentColor.b, Mathf.Lerp(0.3f, 0.52f, proximity));
             trail.AddComponent<TransientSpriteEffect>().Setup(
-                new Vector3(0.1f, length * 0.32f, 1f),
-                new Vector3(0.04f, length * 0.92f, 1f),
+                new Vector3(0.12f + proximity * 0.05f, length * 0.42f, 1f),
+                new Vector3(0.05f, length * (1.18f + proximity * 0.38f), 1f),
                 renderer.color,
                 new Color(renderer.color.r, renderer.color.g, renderer.color.b, 0f),
-                0.09f,
+                bossDrop ? 0.11f : 0.09f,
                 148);
         }
 

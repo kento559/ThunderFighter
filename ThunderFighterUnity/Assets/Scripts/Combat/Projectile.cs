@@ -1,4 +1,5 @@
 ﻿using ThunderFighter.Boss;
+using ThunderFighter.Config;
 using ThunderFighter.Core;
 using UnityEngine;
 
@@ -11,7 +12,9 @@ namespace ThunderFighter.Combat
         {
             Default,
             EliteEnemy,
+            SupportEnemy,
             BossShield,
+            BossBattery,
             BossCore
         }
 
@@ -25,8 +28,12 @@ namespace ThunderFighter.Combat
         private Vector3 visualScale = Vector3.one;
         private bool hasVisualOverride;
         private float nextTrailAt;
+        private ShipArchetype sourceArchetype = ShipArchetype.Balanced;
+        private int sourceWeaponLevel = 1;
 
         public Faction Faction => faction;
+        public ShipArchetype SourceArchetype => sourceArchetype;
+        public int SourceWeaponLevel => sourceWeaponLevel;
 
         private void Awake()
         {
@@ -59,6 +66,8 @@ namespace ThunderFighter.Combat
             hasVisualOverride = false;
             visualTint = Color.white;
             visualScale = Vector3.one;
+            sourceArchetype = ShipArchetype.Balanced;
+            sourceWeaponLevel = 1;
 
             SpriteRenderer renderer = GetComponent<SpriteRenderer>();
             if (renderer != null)
@@ -68,6 +77,12 @@ namespace ThunderFighter.Combat
             }
 
             ApplyArtSprite();
+        }
+
+        public void SetSourceProfile(ShipArchetype archetype, int weaponLevel)
+        {
+            sourceArchetype = archetype;
+            sourceWeaponLevel = Mathf.Clamp(weaponLevel, 1, 4);
         }
 
         public void SetVisualOverride(Color tint, Vector3 scaleMultiplier)
@@ -151,13 +166,24 @@ namespace ThunderFighter.Combat
                 return ImpactProfile.Default;
             }
 
-            ThunderFighter.Boss.BossDamageNode bossNode = other.GetComponent<ThunderFighter.Boss.BossDamageNode>();
+            BossDamageNode bossNode = other.GetComponent<BossDamageNode>();
             if (bossNode != null)
             {
-                return bossNode.IsWeakPoint ? ImpactProfile.BossCore : ImpactProfile.BossShield;
+                return bossNode.NodeType switch
+                {
+                    BossNodeType.Core => ImpactProfile.BossCore,
+                    BossNodeType.LeftBattery => ImpactProfile.BossBattery,
+                    BossNodeType.RightBattery => ImpactProfile.BossBattery,
+                    _ => ImpactProfile.BossShield
+                };
             }
 
             Enemy.EnemyController enemy = other.GetComponent<Enemy.EnemyController>();
+            if (enemy != null && enemy.IsSupportVariant)
+            {
+                return ImpactProfile.SupportEnemy;
+            }
+
             if (enemy != null && enemy.IsEliteVariant)
             {
                 return ImpactProfile.EliteEnemy;
@@ -183,11 +209,25 @@ namespace ThunderFighter.Combat
                     ringTargetScale = new Vector3(0.92f, 0.92f, 1f);
                     ringLifetime = 0.18f;
                     break;
+                case ImpactProfile.SupportEnemy:
+                    flashColor = new Color(0.76f, 1f, 0.9f, 0.98f);
+                    ringColor = new Color(0.32f, 1f, 0.82f, 0.74f);
+                    flashTargetScale = new Vector3(0.94f, 0.94f, 1f);
+                    ringTargetScale = new Vector3(0.98f, 0.98f, 1f);
+                    ringLifetime = 0.18f;
+                    break;
                 case ImpactProfile.BossShield:
                     flashColor = new Color(0.52f, 0.9f, 1f, 0.9f);
                     ringColor = new Color(0.24f, 0.68f, 1f, 0.78f);
                     flashTargetScale = new Vector3(0.82f, 0.82f, 1f);
                     ringTargetScale = new Vector3(1.02f, 1.02f, 1f);
+                    ringLifetime = 0.2f;
+                    break;
+                case ImpactProfile.BossBattery:
+                    flashColor = new Color(1f, 0.86f, 0.56f, 0.96f);
+                    ringColor = new Color(1f, 0.58f, 0.22f, 0.82f);
+                    flashTargetScale = new Vector3(0.96f, 0.96f, 1f);
+                    ringTargetScale = new Vector3(1.08f, 1.08f, 1f);
                     ringLifetime = 0.2f;
                     break;
                 case ImpactProfile.BossCore:
@@ -197,6 +237,24 @@ namespace ThunderFighter.Combat
                     ringTargetScale = new Vector3(1.16f, 1.16f, 1f);
                     ringLifetime = 0.22f;
                     break;
+            }
+
+            if (faction == Faction.Player)
+            {
+                if (sourceArchetype == ShipArchetype.Heavy && (profile == ImpactProfile.BossShield || profile == ImpactProfile.BossBattery || profile == ImpactProfile.BossCore))
+                {
+                    ringTargetScale *= 1.12f;
+                    flashTargetScale *= 1.08f;
+                }
+                else if (sourceArchetype == ShipArchetype.Rapid && (profile == ImpactProfile.EliteEnemy || profile == ImpactProfile.SupportEnemy))
+                {
+                    ringLifetime += 0.03f;
+                    flashTargetScale *= 1.04f;
+                }
+                else if (sourceArchetype == ShipArchetype.Balanced && sourceWeaponLevel >= 4)
+                {
+                    ringTargetScale *= 1.04f;
+                }
             }
 
             GameObject flash = new GameObject(faction == Faction.Player ? "_PlayerImpactFlash" : "_EnemyImpactFlash");
@@ -224,6 +282,31 @@ namespace ThunderFighter.Combat
                 new Color(ringRenderer.color.r, ringRenderer.color.g, ringRenderer.color.b, 0f),
                 ringLifetime,
                 159);
+
+            int sparkCount = profile == ImpactProfile.BossCore ? 5 : profile == ImpactProfile.BossShield || profile == ImpactProfile.BossBattery ? 4 : profile == ImpactProfile.EliteEnemy || profile == ImpactProfile.SupportEnemy ? 3 : 2;
+            float sparkScale = profile == ImpactProfile.BossCore ? 0.42f : profile == ImpactProfile.BossShield || profile == ImpactProfile.BossBattery ? 0.34f : 0.26f;
+            SpawnImpactSparks(hitPosition, ringColor, sparkCount, sparkScale);
+        }
+
+        private void SpawnImpactSparks(Vector3 hitPosition, Color color, int count, float scale)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                GameObject spark = new GameObject("_ImpactSpark");
+                spark.transform.position = hitPosition;
+                spark.transform.rotation = Quaternion.Euler(0f, 0f, Random.Range(0f, 360f));
+                SpriteRenderer sparkRenderer = spark.AddComponent<SpriteRenderer>();
+                sparkRenderer.sprite = RuntimeArtLibrary.Get(RuntimeArtSpriteId.MuzzleFlash) ?? GeneratedSpriteLibrary.Get(GeneratedSpriteKind.Flash);
+                sparkRenderer.color = new Color(color.r, color.g, color.b, 0.82f);
+                float targetScale = scale * Random.Range(0.85f, 1.2f);
+                spark.AddComponent<TransientSpriteEffect>().Setup(
+                    new Vector3(0.08f, 0.16f, 1f),
+                    new Vector3(targetScale, targetScale * 1.6f, 1f),
+                    sparkRenderer.color,
+                    new Color(color.r, color.g, color.b, 0f),
+                    0.1f + i * 0.015f,
+                    161);
+            }
         }
 
         private void Deactivate()
@@ -235,5 +318,3 @@ namespace ThunderFighter.Combat
         }
     }
 }
-
-

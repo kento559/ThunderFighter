@@ -430,8 +430,17 @@ namespace ThunderFighter.Combat
             projectile.Setup(ownerFaction, damage, speed);
             if (ownerFaction == Faction.Player)
             {
+                projectile.SetSourceProfile(playerArchetype, weaponLevel);
                 Color finalTint = supportShot ? Color.Lerp(tint, Color.white, 0.18f) : tint;
                 Vector3 finalScale = supportShot ? new Vector3(scale.x * 0.92f, scale.y * 0.94f, 1f) : scale;
+                if (playerArchetype == ShipArchetype.Rapid && !supportShot)
+                {
+                    finalScale = new Vector3(finalScale.x * 0.9f, finalScale.y * 0.94f, 1f);
+                }
+                else if (playerArchetype == ShipArchetype.Heavy)
+                {
+                    finalScale = new Vector3(finalScale.x * 1.06f, finalScale.y * 1.12f, 1f);
+                }
                 projectile.SetVisualOverride(finalTint, finalScale);
             }
         }
@@ -461,3 +470,4 @@ namespace ThunderFighter.Combat
         }
     }
 }
+

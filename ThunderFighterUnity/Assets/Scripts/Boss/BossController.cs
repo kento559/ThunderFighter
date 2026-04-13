@@ -2,6 +2,7 @@
 using ThunderFighter.Combat;
 using ThunderFighter.Core;
 using ThunderFighter.Player;
+using ThunderFighter.Spawning;
 using UnityEngine;
 
 namespace ThunderFighter.Boss
@@ -27,6 +28,7 @@ namespace ThunderFighter.Boss
         }
 
         private int phaseIndex;
+        private int lastResolvedPhaseIndex = -1;
         private int announcedPhaseIndex = -1;
         private int appliedVisualPhaseIndex = -1;
         private HealthComponent health;
@@ -49,12 +51,31 @@ namespace ThunderFighter.Boss
         private bool entering = true;
         private bool shieldActive = true;
         private bool coreRetaliating;
+        private bool phaseTransitionLocked;
+        private float summonLockUntil;
+        private float nextSummonWindowAt;
         private AudioSource entranceAudio;
         private int chapterIndex = 1;
         private SpriteRenderer shieldRenderer;
         private SpriteRenderer coreRenderer;
+        private SpriteRenderer leftBatteryRenderer;
+        private SpriteRenderer rightBatteryRenderer;
+        private SpriteRenderer leftBatterySlotRenderer;
+        private SpriteRenderer rightBatterySlotRenderer;
+        private SpriteRenderer leftWingDamageRenderer;
+        private SpriteRenderer rightWingDamageRenderer;
         private Collider2D shieldCollider;
         private Collider2D coreCollider;
+        private Collider2D leftBatteryCollider;
+        private Collider2D rightBatteryCollider;
+        private float leftBatteryHp;
+        private float rightBatteryHp;
+        private bool leftBatteryDestroyed;
+        private bool rightBatteryDestroyed;
+        private float nextLeftBatteryWreckFxAt;
+        private float nextRightBatteryWreckFxAt;
+        private float nextLeftWingArcAt;
+        private float nextRightWingArcAt;
         private static AudioClip rumbleClip;
         private static AudioClip warningClip;
         private static AudioClip shieldHitClip;
@@ -114,6 +135,7 @@ namespace ThunderFighter.Boss
             targetY = transform.position.y;
             transform.position = new Vector3(transform.position.x, targetY + 4.2f, transform.position.z);
             nextShieldToggleAt = Time.time + 2.8f;
+            nextSummonWindowAt = Time.time + 4.6f;
             StartCoroutine(PlayEntranceSequence());
         }
 
@@ -149,11 +171,13 @@ namespace ThunderFighter.Boss
             }
 
             UpdatePhaseIndex();
+            HandlePhaseTransitionIfNeeded();
             BossPhaseConfig phase = phases[Mathf.Clamp(phaseIndex, 0, phases.Length - 1)];
             AnnouncePhaseIfNeeded();
             ApplyPhaseArtVariant(phaseIndex);
             UpdateAttackMode();
             UpdateShieldCycle();
+            UpdateSummonWindow();
 
             float x = Mathf.Sin((Time.time + moveSeed) * phase.MoveSpeed) * 4.5f;
             transform.position = new Vector3(x, transform.position.y, transform.position.z);
@@ -161,7 +185,7 @@ namespace ThunderFighter.Boss
             shipVisual?.SetThrustBoost(Mathf.Clamp01(0.54f + strafeMotion * 0.28f + phaseIndex * 0.1f));
             AnimateDefenseNodes();
 
-            if (Time.time >= nextFireAt && !coreRetaliating)
+            if (Time.time >= nextFireAt && !coreRetaliating && !phaseTransitionLocked)
             {
                 nextFireAt = Time.time + phase.FireInterval;
                 ExecuteAttackPattern(phase);
@@ -174,11 +198,12 @@ namespace ThunderFighter.Boss
 
             float ratio = health.MaxHp > 0 ? (float)health.CurrentHp / health.MaxHp : 0f;
             GameEvents.RaiseBossHpChanged(ratio);
+            PublishBossDefenseState();
         }
 
-        public void ProcessNodeHit(int amount, DamageSource source, bool weakPoint, Vector3 hitPosition)
+        public void ProcessNodeHit(int amount, DamageSource source, BossNodeType nodeType, Vector3 hitPosition)
         {
-            if (weakPoint)
+            if (nodeType == BossNodeType.Core)
             {
                 if (shieldActive)
                 {
@@ -197,6 +222,12 @@ namespace ThunderFighter.Boss
                 return;
             }
 
+            if (nodeType == BossNodeType.LeftBattery || nodeType == BossNodeType.RightBattery)
+            {
+                ProcessBatteryHit(nodeType, amount, hitPosition);
+                return;
+            }
+
             if (!shieldActive)
             {
                 SpawnShieldBlockEffect(hitPosition, false);
@@ -212,6 +243,49 @@ namespace ThunderFighter.Boss
             }
         }
 
+
+        private int ApplyPlayerArchetypeModifier(int amount, DamageSource source, BossNodeType nodeType)
+        {
+            if (source.Instigator == null || source.Faction != Faction.Player)
+            {
+                return amount;
+            }
+
+            Projectile projectile = source.Instigator.GetComponent<Projectile>();
+            if (projectile == null)
+            {
+                return amount;
+            }
+
+            int modified = amount;
+            switch (projectile.SourceArchetype)
+            {
+                case ShipArchetype.Heavy:
+                    if (nodeType == BossNodeType.Shield || nodeType == BossNodeType.LeftBattery || nodeType == BossNodeType.RightBattery)
+                    {
+                        modified += projectile.SourceWeaponLevel >= 3 ? 2 : 1;
+                    }
+                    else if (nodeType == BossNodeType.Core)
+                    {
+                        modified += projectile.SourceWeaponLevel >= 4 ? 1 : 0;
+                    }
+                    break;
+                case ShipArchetype.Rapid:
+                    if (nodeType == BossNodeType.Core)
+                    {
+                        modified += projectile.SourceWeaponLevel >= 3 ? 1 : 0;
+                    }
+                    break;
+                default:
+                    if (projectile.SourceWeaponLevel >= 4)
+                    {
+                        modified += 1;
+                    }
+                    break;
+            }
+
+            return Mathf.Max(1, modified);
+        }
         private IEnumerator PlayEntranceSequence()
         {
             GameEvents.RaiseCombatAnnouncement("WARNING: BOSS APPROACH");
@@ -243,8 +317,14 @@ namespace ThunderFighter.Boss
 
         private void SetupDefenseNodes()
         {
-            EnsureDamageNode("_ShieldNode", false, out shieldRenderer, out shieldCollider, 92, 0.86f, GeneratedSpriteKind.Ring, new Vector3(2.55f, 2.55f, 1f));
-            EnsureDamageNode("_CoreNode", true, out coreRenderer, out coreCollider, 95, 0.22f, GeneratedSpriteKind.Cockpit, new Vector3(0.62f, 0.62f, 1f));
+            EnsureDamageNode("_ShieldNode", BossNodeType.Shield, new Vector3(0f, 0.06f, 0f), out shieldRenderer, out shieldCollider, 92, 0.86f, GeneratedSpriteKind.Ring, new Vector3(2.55f, 2.55f, 1f));
+            EnsureDamageNode("_CoreNode", BossNodeType.Core, new Vector3(0f, 0.15f, 0f), out coreRenderer, out coreCollider, 95, 0.22f, GeneratedSpriteKind.Cockpit, new Vector3(0.62f, 0.62f, 1f));
+            EnsureDamageNode("_LeftBatteryNode", BossNodeType.LeftBattery, new Vector3(-1.62f, 0.02f, 0f), out leftBatteryRenderer, out leftBatteryCollider, 91, 0.36f, GeneratedSpriteKind.Engine, new Vector3(0.92f, 0.92f, 1f));
+            EnsureDamageNode("_RightBatteryNode", BossNodeType.RightBattery, new Vector3(1.62f, 0.02f, 0f), out rightBatteryRenderer, out rightBatteryCollider, 91, 0.36f, GeneratedSpriteKind.Engine, new Vector3(0.92f, 0.92f, 1f));
+            EnsureBatterySlot("_LeftBatterySlot", new Vector3(-1.22f, 0.06f, 0f), out leftBatterySlotRenderer);
+            EnsureBatterySlot("_RightBatterySlot", new Vector3(1.22f, 0.06f, 0f), out rightBatterySlotRenderer);
+            EnsureWingDamageOverlay("_LeftWingDamage", new Vector3(-1.9f, 0.34f, 0f), -24f, out leftWingDamageRenderer);
+            EnsureWingDamageOverlay("_RightWingDamage", new Vector3(1.9f, 0.34f, 0f), 24f, out rightWingDamageRenderer);
 
             if (shieldRenderer != null)
             {
@@ -255,19 +335,70 @@ namespace ThunderFighter.Boss
             {
                 coreRenderer.color = new Color(1f, 0.84f, 0.34f, 0.85f);
             }
+
+            if (leftBatteryRenderer != null)
+            {
+                leftBatteryRenderer.color = new Color(1f, 0.74f, 0.3f, 0.84f);
+            }
+
+            if (rightBatteryRenderer != null)
+            {
+                rightBatteryRenderer.color = new Color(1f, 0.74f, 0.3f, 0.84f);
+            }
+
+            ResetBatteryNodes();
         }
 
-        private void EnsureDamageNode(string name, bool weakPoint, out SpriteRenderer renderer, out Collider2D collider2d, int order, float radius, GeneratedSpriteKind spriteKind, Vector3 localScale)
+        private void EnsureBatterySlot(string name, Vector3 localPosition, out SpriteRenderer renderer)
         {
             Transform child = transform.Find(name);
             if (child == null)
             {
                 GameObject go = new GameObject(name);
                 go.transform.SetParent(transform, false);
-                go.transform.localPosition = weakPoint ? new Vector3(0f, 0.15f, 0f) : new Vector3(0f, 0.06f, 0f);
+                go.transform.localPosition = localPosition;
+                go.transform.localRotation = Quaternion.identity;
+                go.transform.localScale = new Vector3(0.88f, 0.88f, 1f);
+                child = go.transform;
+            }
+
+            renderer = VisualDebugSprite.Ensure(child.gameObject, new Color(1f, 0.78f, 0.32f, 0.84f), 89, 1f, GeneratedSpriteKind.Engine);
+            renderer.color = new Color(1f, 0.78f, 0.32f, 0.84f);
+        }
+
+        private void EnsureWingDamageOverlay(string name, Vector3 localPosition, float rotationZ, out SpriteRenderer renderer)
+        {
+            Transform child = transform.Find(name);
+            if (child == null)
+            {
+                GameObject go = new GameObject(name);
+                go.transform.SetParent(transform, false);
+                go.transform.localPosition = localPosition;
+                go.transform.localRotation = Quaternion.Euler(0f, 0f, rotationZ);
+                go.transform.localScale = new Vector3(0.92f, 1.18f, 1f);
+                child = go.transform;
+            }
+
+            renderer = VisualDebugSprite.Ensure(child.gameObject, new Color(0.18f, 0.12f, 0.1f, 0f), 88, 1f, GeneratedSpriteKind.Wing);
+            renderer.color = new Color(0.18f, 0.12f, 0.1f, 0f);
+        }
+
+        private void EnsureDamageNode(string name, BossNodeType nodeType, Vector3 localPosition, out SpriteRenderer renderer, out Collider2D collider2d, int order, float radius, GeneratedSpriteKind spriteKind, Vector3 localScale)
+        {
+            Transform child = transform.Find(name);
+            if (child == null)
+            {
+                GameObject go = new GameObject(name);
+                go.transform.SetParent(transform, false);
+                go.transform.localPosition = localPosition;
                 go.transform.localRotation = Quaternion.identity;
                 go.transform.localScale = localScale;
                 child = go.transform;
+            }
+            else
+            {
+                child.localPosition = localPosition;
+                child.localScale = localScale;
             }
 
             renderer = VisualDebugSprite.Ensure(child.gameObject, Color.white, order, 1f, spriteKind);
@@ -290,7 +421,7 @@ namespace ThunderFighter.Boss
                 node = child.gameObject.AddComponent<BossDamageNode>();
             }
 
-            node.Initialize(this, weakPoint);
+            node.Initialize(this, nodeType);
         }
 
         private void UpdatePhaseIndex()
@@ -308,10 +439,30 @@ namespace ThunderFighter.Boss
             phaseIndex = selected;
         }
 
+        private void HandlePhaseTransitionIfNeeded()
+        {
+            if (lastResolvedPhaseIndex == -1)
+            {
+                lastResolvedPhaseIndex = phaseIndex;
+                PublishPhaseTelemetry(false);
+                return;
+            }
+
+            if (phaseIndex == lastResolvedPhaseIndex)
+            {
+                PublishPhaseTelemetry(phaseTransitionLocked);
+                return;
+            }
+
+            lastResolvedPhaseIndex = phaseIndex;
+            StartCoroutine(PlayPhaseTransitionRoutine(phaseIndex));
+        }
+
         private void UpdateAttackMode()
         {
             if (Time.time < nextAttackModeChangeAt)
             {
+                PublishAttackTelemetry(currentAttackMode, currentAttackMode, Mathf.Max(0f, nextAttackModeChangeAt - Time.time));
                 return;
             }
 
@@ -337,6 +488,15 @@ namespace ThunderFighter.Boss
 
             int index = Mathf.Abs(Mathf.FloorToInt((Time.time + attackPatternSeed) * 0.73f)) % phaseModes.Length;
             BossAttackMode nextMode = phaseModes[index];
+            if (leftBatteryDestroyed && rightBatteryDestroyed && (nextMode == BossAttackMode.SideLances || nextMode == BossAttackMode.RainVolley))
+            {
+                nextMode = chapterIndex switch
+                {
+                    3 => BossAttackMode.PrismLance,
+                    2 => BossAttackMode.AsteroidScatter,
+                    _ => BossAttackMode.OrbitalLattice
+                };
+            }
             if (!hasAnnouncedAttackMode || nextMode != currentAttackMode)
             {
                 currentAttackMode = nextMode;
@@ -347,6 +507,17 @@ namespace ThunderFighter.Boss
                 currentAttackMode = nextMode;
             }
             nextAttackModeChangeAt = Time.time + Mathf.Lerp(2.8f, 1.45f, Mathf.Clamp01(phaseIndex / 2f));
+            BossAttackMode previewMode = phaseModes[(index + 1) % phaseModes.Length];
+            if (leftBatteryDestroyed && rightBatteryDestroyed && (previewMode == BossAttackMode.SideLances || previewMode == BossAttackMode.RainVolley))
+            {
+                previewMode = chapterIndex switch
+                {
+                    3 => BossAttackMode.PrismLance,
+                    2 => BossAttackMode.AsteroidScatter,
+                    _ => BossAttackMode.OrbitalLattice
+                };
+            }
+            PublishAttackTelemetry(currentAttackMode, previewMode, Mathf.Max(0f, nextAttackModeChangeAt - Time.time));
         }
 
         private void AnnounceAttackMode(BossAttackMode mode)
@@ -368,10 +539,32 @@ namespace ThunderFighter.Boss
                     message = LocalizationService.Text("BOSS ARC SWEEP INBOUND", "Boss 弧线扫荡来袭");
                     break;
                 case BossAttackMode.SideLances:
-                    message = LocalizationService.Text("BOSS SIDE BATTERIES ONLINE", "Boss 侧舷炮列阵启动");
+                    if (leftBatteryDestroyed && rightBatteryDestroyed)
+                    {
+                        message = LocalizationService.Text("SIDE BATTERIES DESTROYED - BACKUP FIRE ONLY", "侧舷炮已瘫痪 - 仅剩备用火力");
+                    }
+                    else if (leftBatteryDestroyed || rightBatteryDestroyed)
+                    {
+                        message = LocalizationService.Text("SIDE BATTERY ARRAY DEGRADED", "侧舷炮列阵受损");
+                    }
+                    else
+                    {
+                        message = LocalizationService.Text("BOSS SIDE BATTERIES ONLINE", "Boss 侧舷炮列阵启动");
+                    }
                     break;
                 case BossAttackMode.RainVolley:
-                    message = LocalizationService.Text("BOSS VOLLEY CURTAIN FORMING", "Boss 弹幕雨幕生成");
+                    if (leftBatteryDestroyed && rightBatteryDestroyed)
+                    {
+                        message = LocalizationService.Text("VOLLEY CURTAIN COLLAPSING", "弹幕雨幕正在崩塌");
+                    }
+                    else if (leftBatteryDestroyed || rightBatteryDestroyed)
+                    {
+                        message = LocalizationService.Text("VOLLEY CURTAIN COMPROMISED", "弹幕雨幕出现缺口");
+                    }
+                    else
+                    {
+                        message = LocalizationService.Text("BOSS VOLLEY CURTAIN FORMING", "Boss 弹幕雨幕生成");
+                    }
                     break;
                 case BossAttackMode.OrbitalLattice:
                     message = LocalizationService.Text("ORBITAL GRID FIRING", "轨道格网火力开启");
@@ -390,6 +583,42 @@ namespace ThunderFighter.Boss
             GameEvents.RaiseCombatAnnouncement(message);
         }
 
+        private void PublishAttackTelemetry(BossAttackMode currentMode, BossAttackMode nextMode, float etaSeconds)
+        {
+            GameEvents.RaiseBossAttackTelemetryChanged(GetAttackModeLabel(currentMode), GetAttackModeLabel(nextMode), etaSeconds);
+        }
+
+        private string GetAttackModeLabel(BossAttackMode mode)
+        {
+            switch (mode)
+            {
+                case BossAttackMode.AimedBurst:
+                    return LocalizationService.Text("Lock burst", "锁定齐射");
+                case BossAttackMode.SweepingArc:
+                    return LocalizationService.Text("Arc sweep", "弧线扫荡");
+                case BossAttackMode.SideLances:
+                    if (leftBatteryDestroyed && rightBatteryDestroyed)
+                    {
+                        return LocalizationService.Text("Backup side fire", "备用侧舷火力");
+                    }
+                    return LocalizationService.Text(leftBatteryDestroyed || rightBatteryDestroyed ? "Damaged side lances" : "Side lances", leftBatteryDestroyed || rightBatteryDestroyed ? "受损侧舷重炮" : "侧舷重炮");
+                case BossAttackMode.RainVolley:
+                    if (leftBatteryDestroyed && rightBatteryDestroyed)
+                    {
+                        return LocalizationService.Text("Collapsed volley", "崩塌雨幕");
+                    }
+                    return LocalizationService.Text(leftBatteryDestroyed || rightBatteryDestroyed ? "Broken volley curtain" : "Volley curtain", leftBatteryDestroyed || rightBatteryDestroyed ? "缺口雨幕" : "雨幕弹幕");
+                case BossAttackMode.OrbitalLattice:
+                    return LocalizationService.Text("Orbital lattice", "轨道格网");
+                case BossAttackMode.AsteroidScatter:
+                    return LocalizationService.Text("Asteroid scatter", "陨石散裂");
+                case BossAttackMode.PrismLance:
+                    return LocalizationService.Text("Prism lance", "棱镜枪阵");
+                default:
+                    return LocalizationService.Text("Spread volley", "扇形压制");
+            }
+        }
+
         private void UpdateShieldCycle()
         {
             if (shieldActive)
@@ -401,6 +630,54 @@ namespace ThunderFighter.Boss
             {
                 ApplyShieldState(true, true);
             }
+        }
+
+        private void UpdateSummonWindow()
+        {
+            if (Time.time < summonLockUntil || Time.time < nextSummonWindowAt)
+            {
+                return;
+            }
+
+            bool includeSupport = chapterIndex >= 2;
+            nextSummonWindowAt = Time.time + (phaseIndex >= 2 ? 9f : 12f);
+            summonLockUntil = Time.time + 2.5f;
+            EnemySpawner.SpawnBossSummonWing(transform.position + Vector3.down * 0.8f, chapterIndex, includeSupport);
+            GameEvents.RaiseCombatAnnouncement(LocalizationService.Text("Boss is calling reinforcements", "Boss 正在呼叫增援"));
+            GameEvents.RaiseThreatEdgePulse(0.45f, chapterIndex == 3);
+        }
+
+        private IEnumerator PlayPhaseTransitionRoutine(int newPhaseIndex)
+        {
+            phaseTransitionLocked = true;
+            PublishPhaseTelemetry(true);
+            string label = newPhaseIndex switch
+            {
+                2 => LocalizationService.Text("PHASE THREE - FINAL ASSAULT", "三阶段 - 终局压制"),
+                1 => LocalizationService.Text("PHASE TWO - PATTERN SHIFT", "二阶段 - 攻击模式切换"),
+                _ => LocalizationService.Text("BOSS ENGAGED", "Boss 正式交战")
+            };
+
+            GameEvents.RaiseCombatAnnouncement(label);
+            GameEvents.RaiseThreatEdgePulse(0.55f, newPhaseIndex >= 1);
+            Camera cam = Camera.main;
+            if (cam == null)
+            {
+                cam = Object.FindFirstObjectByType<Camera>();
+            }
+            CameraShakeController.Ensure(cam)?.Shake(0.18f + newPhaseIndex * 0.05f, 0.28f + newPhaseIndex * 0.08f);
+            PlayBossSfx(coreChargeClip, 0.26f, 0.82f + newPhaseIndex * 0.08f);
+            SpawnPhaseShiftVisual();
+
+            float originalTimeScale = Time.timeScale;
+            Time.timeScale = 0.55f;
+            yield return new WaitForSecondsRealtime(0.14f);
+            Time.timeScale = originalTimeScale;
+
+            nextFireAt = Time.time + 0.55f;
+            nextSummonWindowAt = Mathf.Min(nextSummonWindowAt, Time.time + 1.8f);
+            phaseTransitionLocked = false;
+            PublishPhaseTelemetry(false);
         }
 
         private float GetShieldMaxHp()
@@ -431,6 +708,72 @@ namespace ThunderFighter.Boss
             }
 
             return 2f;
+        }
+
+        private float GetBatteryMaxHp()
+        {
+            if (phaseIndex >= 2)
+            {
+                return 12f;
+            }
+
+            if (phaseIndex >= 1)
+            {
+                return 9f;
+            }
+
+            return 7f;
+        }
+
+        private void ResetBatteryNodes()
+        {
+            leftBatteryDestroyed = false;
+            rightBatteryDestroyed = false;
+            leftBatteryHp = GetBatteryMaxHp();
+            rightBatteryHp = GetBatteryMaxHp();
+            nextLeftBatteryWreckFxAt = 0f;
+            nextRightBatteryWreckFxAt = 0f;
+            nextLeftWingArcAt = 0f;
+            nextRightWingArcAt = 0f;
+
+            if (leftBatteryCollider != null)
+            {
+                leftBatteryCollider.enabled = true;
+            }
+
+            if (rightBatteryCollider != null)
+            {
+                rightBatteryCollider.enabled = true;
+            }
+
+            ResetBatterySlotVisual(leftBatterySlotRenderer);
+            ResetBatterySlotVisual(rightBatterySlotRenderer);
+            ResetWingDamageOverlay(leftWingDamageRenderer);
+            ResetWingDamageOverlay(rightWingDamageRenderer);
+        }
+
+        private void ResetBatterySlotVisual(SpriteRenderer renderer)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            renderer.sprite = GeneratedSpriteLibrary.Get(GeneratedSpriteKind.Engine);
+            renderer.color = new Color(1f, 0.78f, 0.32f, 0.82f);
+            renderer.transform.localScale = new Vector3(0.88f, 0.88f, 1f);
+            renderer.transform.localRotation = Quaternion.identity;
+        }
+
+        private void ResetWingDamageOverlay(SpriteRenderer renderer)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            renderer.color = new Color(0.18f, 0.12f, 0.1f, 0f);
+            renderer.transform.localScale = new Vector3(0.92f, 1.18f, 1f);
         }
 
         private void ApplyShieldState(bool active, bool announce)
@@ -465,6 +808,77 @@ namespace ThunderFighter.Boss
             {
                 GameEvents.RaiseCombatAnnouncement(active ? "BOSS SHIELD REBUILT" : "CORE EXPOSED");
             }
+
+            PublishBossDefenseState();
+            PublishPhaseTelemetry(phaseTransitionLocked);
+        }
+
+        private void PublishBossDefenseState()
+        {
+            float normalized = shieldActive
+                ? Mathf.Clamp01(shieldCurrentHp / Mathf.Max(1f, GetShieldMaxHp()))
+                : 1f;
+            float timerRemaining = shieldActive ? 0f : Mathf.Max(0f, nextShieldToggleAt - Time.time);
+
+            string label = shieldActive
+                ? LocalizationService.Text("Shield active", "护盾在线")
+                : LocalizationService.Text("Core exposed", "核心暴露");
+
+            GameEvents.RaiseBossDefenseStateChanged(shieldActive, normalized, label, timerRemaining);
+        }
+
+        private void PublishPhaseTelemetry(bool transitionLocked)
+        {
+            string phaseLabel = phaseIndex switch
+            {
+                2 => LocalizationService.Text("Phase 3: Final assault", "三阶段: 终局压制"),
+                1 => LocalizationService.Text("Phase 2: Pattern shift", "二阶段: 模式切换"),
+                _ => LocalizationService.Text("Phase 1: Initial engage", "一阶段: 初始交战")
+            };
+
+            string moduleLabel;
+            if (leftBatteryDestroyed && rightBatteryDestroyed)
+            {
+                moduleLabel = LocalizationService.Text("Side batteries offline", "双侧炮台离线");
+            }
+            else if (leftBatteryDestroyed || rightBatteryDestroyed)
+            {
+                moduleLabel = LocalizationService.Text("Single battery damaged", "单侧炮台受损");
+            }
+            else
+            {
+                moduleLabel = LocalizationService.Text("Battery arrays online", "炮台列阵在线");
+            }
+
+            GameEvents.RaiseBossPhaseTelemetryChanged(phaseLabel, moduleLabel, transitionLocked);
+        }
+
+        private void ProcessBatteryHit(BossNodeType nodeType, int amount, Vector3 hitPosition)
+        {
+            bool leftNode = nodeType == BossNodeType.LeftBattery;
+            if ((leftNode && leftBatteryDestroyed) || (!leftNode && rightBatteryDestroyed))
+            {
+                return;
+            }
+
+            float currentHp = leftNode ? leftBatteryHp : rightBatteryHp;
+            currentHp -= Mathf.Max(1, amount);
+            SpawnBatteryHitEffect(hitPosition, leftNode);
+            PlayBossSfx(shieldHitClip, 0.2f, leftNode ? 0.88f : 0.92f);
+
+            if (leftNode)
+            {
+                leftBatteryHp = currentHp;
+            }
+            else
+            {
+                rightBatteryHp = currentHp;
+            }
+
+            if (currentHp <= 0f)
+            {
+                BreakBattery(nodeType, hitPosition);
+            }
         }
 
         private void BreakShield(Vector3 hitPosition)
@@ -474,6 +888,70 @@ namespace ThunderFighter.Boss
             PlayBossSfx(shieldBreakClip, 0.34f, 0.86f);
             PlayBossSfx(coreExposeClip, 0.2f, 1.12f);
             GameEvents.RaiseCombatAnnouncement("SHIELD BREAK - CORE EXPOSED");
+            if (Time.time >= summonLockUntil)
+            {
+                summonLockUntil = Time.time + 4.6f;
+                EnemySpawner.SpawnBossSummonWing(transform.position + Vector3.down * 0.65f, chapterIndex, phaseIndex >= 1);
+            }
+        }
+
+        private void BreakBattery(BossNodeType nodeType, Vector3 hitPosition)
+        {
+            bool leftNode = nodeType == BossNodeType.LeftBattery;
+            if (leftNode)
+            {
+                leftBatteryDestroyed = true;
+                if (leftBatteryCollider != null)
+                {
+                    leftBatteryCollider.enabled = false;
+                }
+            }
+            else
+            {
+                rightBatteryDestroyed = true;
+                if (rightBatteryCollider != null)
+                {
+                    rightBatteryCollider.enabled = false;
+                }
+            }
+
+            SetBatteryWreckVisual(leftNode);
+            SpawnBatteryBreakEffect(hitPosition, leftNode);
+            PlayBossSfx(shieldBreakClip, 0.28f, leftNode ? 0.76f : 0.8f);
+            GameEvents.RaiseCombatAnnouncement(leftNode
+                ? LocalizationService.Text("LEFT BATTERY DESTROYED", "左侧炮台已摧毁")
+                : LocalizationService.Text("RIGHT BATTERY DESTROYED", "右侧炮台已摧毁"));
+            PublishPhaseTelemetry(false);
+        }
+
+        private void SetBatteryWreckVisual(bool leftNode)
+        {
+            SpriteRenderer renderer = leftNode ? leftBatteryRenderer : rightBatteryRenderer;
+            if (renderer == null)
+            {
+                return;
+            }
+
+            renderer.sprite = RuntimeArtLibrary.Get(leftNode ? RuntimeArtSpriteId.BossFragmentA : RuntimeArtSpriteId.BossFragmentB) ?? renderer.sprite;
+            renderer.color = new Color(0.28f, 0.22f, 0.18f, 0.82f);
+            renderer.transform.localScale = new Vector3(0.68f, 0.68f, 1f);
+            renderer.transform.localRotation = Quaternion.Euler(0f, 0f, leftNode ? -36f : 36f);
+
+            SpriteRenderer slotRenderer = leftNode ? leftBatterySlotRenderer : rightBatterySlotRenderer;
+            if (slotRenderer != null)
+            {
+                slotRenderer.sprite = GeneratedSpriteLibrary.Get(GeneratedSpriteKind.Hull);
+                slotRenderer.color = new Color(0.18f, 0.14f, 0.12f, 0.88f);
+                slotRenderer.transform.localScale = new Vector3(0.94f, 0.7f, 1f);
+                slotRenderer.transform.localRotation = Quaternion.Euler(0f, 0f, leftNode ? -10f : 10f);
+            }
+
+            SpriteRenderer wingRenderer = leftNode ? leftWingDamageRenderer : rightWingDamageRenderer;
+            if (wingRenderer != null)
+            {
+                wingRenderer.color = new Color(0.22f, 0.14f, 0.12f, 0.62f);
+                wingRenderer.transform.localScale = new Vector3(1.02f, 1.28f, 1f);
+            }
         }
 
         private void TryTriggerCoreRetaliation()
@@ -609,6 +1087,141 @@ namespace ThunderFighter.Boss
                     ? new Color(1f, 0.84f, 0.34f, 0.34f)
                     : new Color(1f, 0.96f, 0.62f, 0.96f);
             }
+
+            AnimateBatteryNode(leftBatteryRenderer, leftBatteryDestroyed, leftBatteryHp, true);
+            AnimateBatteryNode(rightBatteryRenderer, rightBatteryDestroyed, rightBatteryHp, false);
+        }
+
+        private void AnimateBatteryNode(SpriteRenderer renderer, bool destroyed, float currentHp, bool leftNode)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            float pulse = 0.94f + Mathf.Sin(Time.time * (leftNode ? 6.4f : 6f)) * 0.08f;
+            float hpRatio = Mathf.Clamp01(currentHp / Mathf.Max(1f, GetBatteryMaxHp()));
+            float warningPulse = hpRatio < 0.34f && !destroyed ? 1f + Mathf.PingPong(Time.time * 8.6f, 0.32f) : 1f;
+            renderer.transform.localScale = Vector3.one * 0.92f * pulse * warningPulse;
+            if (destroyed)
+            {
+                renderer.color = new Color(0.24f, 0.2f, 0.18f, 0.16f);
+                float nextFxAt = leftNode ? nextLeftBatteryWreckFxAt : nextRightBatteryWreckFxAt;
+                if (Time.time >= nextFxAt)
+                {
+                    SpawnBatteryWreckFx(renderer.transform.position, leftNode);
+                    if (leftNode)
+                    {
+                        nextLeftBatteryWreckFxAt = Time.time + 0.22f;
+                    }
+                    else
+                    {
+                        nextRightBatteryWreckFxAt = Time.time + 0.22f;
+                    }
+                }
+                AnimateBatterySlot(leftNode ? leftBatterySlotRenderer : rightBatterySlotRenderer, 0f, true);
+                AnimateWingDamageOverlay(leftNode ? leftWingDamageRenderer : rightWingDamageRenderer, true);
+                return;
+            }
+
+            Color color = Color.Lerp(new Color(1f, 0.42f, 0.2f, 0.84f), new Color(1f, 0.82f, 0.42f, 0.96f), hpRatio);
+            if (hpRatio < 0.34f)
+            {
+                float flash = 0.38f + Mathf.PingPong(Time.time * 9.2f, 0.62f);
+                color = Color.Lerp(color, new Color(1f, 0.96f, 0.82f, 1f), flash);
+            }
+
+            renderer.color = color;
+            AnimateBatterySlot(leftNode ? leftBatterySlotRenderer : rightBatterySlotRenderer, hpRatio, destroyed);
+            AnimateWingDamageOverlay(leftNode ? leftWingDamageRenderer : rightWingDamageRenderer, false);
+        }
+
+        private void AnimateBatterySlot(SpriteRenderer renderer, float hpRatio, bool destroyed)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            if (destroyed)
+            {
+                float residual = 0.18f + Mathf.PingPong(Time.time * 2.2f, 0.16f);
+                renderer.color = new Color(0.34f + residual * 0.4f, 0.16f + residual * 0.18f, 0.08f, 0.72f + residual * 0.2f);
+                return;
+            }
+
+            float pulse = 0.16f + Mathf.PingPong(Time.time * 2.8f, 0.16f);
+            Color online = Color.Lerp(new Color(1f, 0.54f, 0.2f, 0.66f), new Color(1f, 0.9f, 0.54f, 0.92f), hpRatio);
+            if (hpRatio < 0.34f)
+            {
+                online = Color.Lerp(online, new Color(1f, 0.98f, 0.84f, 1f), 0.3f + Mathf.PingPong(Time.time * 8.4f, 0.5f));
+            }
+            else
+            {
+                online.a += pulse;
+            }
+
+            renderer.color = online;
+        }
+
+        private void AnimateWingDamageOverlay(SpriteRenderer renderer, bool destroyed)
+        {
+            if (renderer == null)
+            {
+                return;
+            }
+
+            if (destroyed)
+            {
+                float ember = 0.12f + Mathf.PingPong(Time.time * 1.8f, 0.14f);
+                renderer.color = new Color(0.22f + ember, 0.12f + ember * 0.36f, 0.1f, 0.46f + ember * 0.28f);
+                TrySpawnWingArc(renderer == leftWingDamageRenderer);
+                return;
+            }
+
+            renderer.color = Color.Lerp(renderer.color, new Color(0.18f, 0.12f, 0.1f, 0f), 0.1f);
+        }
+
+        private void TrySpawnWingArc(bool leftNode)
+        {
+            float nextArcAt = leftNode ? nextLeftWingArcAt : nextRightWingArcAt;
+            if (Time.time < nextArcAt)
+            {
+                return;
+            }
+
+            SpriteRenderer renderer = leftNode ? leftWingDamageRenderer : rightWingDamageRenderer;
+            if (renderer == null)
+            {
+                return;
+            }
+
+            Vector3 basePosition = renderer.transform.position + new Vector3(leftNode ? -0.12f : 0.12f, 0.06f, 0f);
+            for (int i = 0; i < 2; i++)
+            {
+                GameObject arc = new GameObject(leftNode ? "_LeftWingArc" : "_RightWingArc");
+                arc.transform.position = basePosition + new Vector3((leftNode ? -1f : 1f) * i * 0.08f, i * 0.05f, 0f);
+                arc.transform.rotation = Quaternion.Euler(0f, 0f, leftNode ? -22f - i * 10f : 22f + i * 10f);
+                SpriteRenderer arcRenderer = arc.AddComponent<SpriteRenderer>();
+                arcRenderer.sprite = RuntimeArtLibrary.Get(RuntimeArtSpriteId.MuzzleFlash) ?? GeneratedSpriteLibrary.Get(GeneratedSpriteKind.Flash);
+                arcRenderer.color = new Color(0.72f, 0.96f, 1f, 0.78f);
+                arc.AddComponent<TransientSpriteEffect>().Setup(
+                    new Vector3(0.08f, 0.16f, 1f),
+                    new Vector3(0.26f + i * 0.04f, 0.52f + i * 0.08f, 1f),
+                    arcRenderer.color,
+                    new Color(0.28f, 0.82f, 1f, 0f),
+                    0.1f + i * 0.02f,
+                    166);
+            }
+
+            if (leftNode)
+            {
+                nextLeftWingArcAt = Time.time + 0.34f;
+            }
+            else
+            {
+                nextRightWingArcAt = Time.time + 0.34f;
+            }
         }
 
         private void AnnouncePhaseIfNeeded()
@@ -637,6 +1250,7 @@ namespace ThunderFighter.Boss
             }
 
             appliedVisualPhaseIndex = index;
+            ResetBatteryNodes();
             if (index >= 1)
             {
                 shipVisual.SetArtVariant(RuntimeArtSpriteId.BossShipPhase2, RuntimeArtSpriteId.BossShipPhase2Damaged, RuntimeArtSpriteId.BossPhase2FragmentA, RuntimeArtSpriteId.BossPhase2FragmentB);
@@ -740,12 +1354,30 @@ namespace ThunderFighter.Boss
                 return;
             }
 
+            if (leftBatteryDestroyed && rightBatteryDestroyed)
+            {
+                FireFallbackBatterylessPattern(phase);
+                return;
+            }
+
             float lateral = 1.35f;
             Vector3 left = firePoint.position - transform.right * lateral;
             Vector3 right = firePoint.position + transform.right * lateral;
-            SpawnBossProjectile(left, firePoint.rotation * Quaternion.Euler(0f, 0f, -18f), 1.32f, 9.6f + phaseIndex * 0.7f);
-            SpawnBossProjectile(right, firePoint.rotation * Quaternion.Euler(0f, 0f, 18f), 1.32f, 9.6f + phaseIndex * 0.7f);
-            FireSpread(Mathf.Max(3, phase.BulletsPerShot - 1), Mathf.Max(18f, phase.SpreadAngle * 0.7f), 0f);
+            int lanceShots = 0;
+            if (!leftBatteryDestroyed)
+            {
+                SpawnBossProjectile(left, firePoint.rotation * Quaternion.Euler(0f, 0f, -18f), 1.32f, 9.6f + phaseIndex * 0.7f);
+                lanceShots++;
+            }
+
+            if (!rightBatteryDestroyed)
+            {
+                SpawnBossProjectile(right, firePoint.rotation * Quaternion.Euler(0f, 0f, 18f), 1.32f, 9.6f + phaseIndex * 0.7f);
+                lanceShots++;
+            }
+
+            int centerSpread = Mathf.Max(2, phase.BulletsPerShot - (lanceShots == 0 ? 0 : 1));
+            FireSpread(centerSpread, Mathf.Max(18f, phase.SpreadAngle * 0.7f), 0f);
         }
 
         private void FireRainVolley(BossPhaseConfig phase)
@@ -755,15 +1387,47 @@ namespace ThunderFighter.Boss
                 return;
             }
 
+            if (leftBatteryDestroyed && rightBatteryDestroyed)
+            {
+                FireFallbackBatterylessPattern(phase);
+                return;
+            }
+
             int columns = Mathf.Max(4, phase.BulletsPerShot);
             float width = 3.2f;
             for (int i = 0; i < columns; i++)
             {
                 float t = columns == 1 ? 0.5f : (float)i / (columns - 1);
+                if (leftBatteryDestroyed && t < 0.38f)
+                {
+                    continue;
+                }
+
+                if (rightBatteryDestroyed && t > 0.62f)
+                {
+                    continue;
+                }
+
                 float xOffset = Mathf.Lerp(-width, width, t);
                 Vector3 spawn = firePoint.position + transform.right * xOffset;
                 float drift = Mathf.Lerp(-12f, 12f, t);
                 SpawnBossProjectile(spawn, firePoint.rotation * Quaternion.Euler(0f, 0f, drift), 0.96f, 8.8f + phaseIndex * 0.55f);
+            }
+        }
+
+        private void FireFallbackBatterylessPattern(BossPhaseConfig phase)
+        {
+            switch (chapterIndex)
+            {
+                case 3:
+                    FirePrismLance(phase);
+                    break;
+                case 2:
+                    FireAsteroidScatter(phase);
+                    break;
+                default:
+                    FireOrbitalLattice(phase);
+                    break;
             }
         }
 
@@ -890,6 +1554,71 @@ namespace ThunderFighter.Boss
             }
         }
 
+        private void SpawnBatteryHitEffect(Vector3 position, bool leftNode)
+        {
+            GameObject flash = new GameObject(leftNode ? "_LeftBatteryHit" : "_RightBatteryHit");
+            flash.transform.position = position;
+            SpriteRenderer renderer = flash.AddComponent<SpriteRenderer>();
+            renderer.sprite = RuntimeArtLibrary.Get(RuntimeArtSpriteId.MuzzleFlash) ?? GeneratedSpriteLibrary.Get(GeneratedSpriteKind.Flash);
+            renderer.color = leftNode ? new Color(1f, 0.78f, 0.4f, 0.88f) : new Color(1f, 0.7f, 0.34f, 0.88f);
+            flash.AddComponent<TransientSpriteEffect>().Setup(
+                new Vector3(0.22f, 0.22f, 1f),
+                new Vector3(0.82f, 0.82f, 1f),
+                renderer.color,
+                new Color(1f, 0.3f, 0.08f, 0f),
+                0.14f,
+                172);
+        }
+
+        private void SpawnBatteryBreakEffect(Vector3 position, bool leftNode)
+        {
+            for (int i = 0; i < 4; i++)
+            {
+                GameObject ring = new GameObject(leftNode ? "_LeftBatteryBreak" : "_RightBatteryBreak");
+                ring.transform.position = position + (Vector3)(Random.insideUnitCircle * 0.18f);
+                SpriteRenderer renderer = ring.AddComponent<SpriteRenderer>();
+                renderer.sprite = GeneratedSpriteLibrary.Get(i % 2 == 0 ? GeneratedSpriteKind.Ring : GeneratedSpriteKind.Flash);
+                renderer.color = new Color(1f, 0.72f, 0.32f, 0.88f);
+                ring.AddComponent<TransientSpriteEffect>().Setup(
+                    new Vector3(0.18f, 0.18f, 1f),
+                    new Vector3(0.9f + i * 0.12f, 0.9f + i * 0.12f, 1f),
+                    renderer.color,
+                    new Color(1f, 0.32f, 0.08f, 0f),
+                    0.24f + i * 0.03f,
+                    173);
+            }
+        }
+
+        private void SpawnBatteryWreckFx(Vector3 position, bool leftNode)
+        {
+            GameObject smoke = new GameObject(leftNode ? "_LeftBatterySmoke" : "_RightBatterySmoke");
+            smoke.transform.position = position + new Vector3(leftNode ? -0.06f : 0.06f, 0.12f, 0f);
+            SpriteRenderer smokeRenderer = smoke.AddComponent<SpriteRenderer>();
+            smokeRenderer.sprite = RuntimeArtLibrary.Get(RuntimeArtSpriteId.MuzzleFlash) ?? GeneratedSpriteLibrary.Get(GeneratedSpriteKind.Flash);
+            smokeRenderer.color = new Color(0.2f, 0.2f, 0.2f, 0.36f);
+            smoke.AddComponent<TransientSpriteEffect>().Setup(
+                new Vector3(0.18f, 0.24f, 1f),
+                new Vector3(0.62f, 0.96f, 1f),
+                smokeRenderer.color,
+                new Color(0.12f, 0.12f, 0.12f, 0f),
+                0.38f,
+                168);
+
+            GameObject spark = new GameObject(leftNode ? "_LeftBatterySpark" : "_RightBatterySpark");
+            spark.transform.position = position + (Vector3)(Random.insideUnitCircle * 0.08f);
+            spark.transform.rotation = Quaternion.Euler(0f, 0f, Random.Range(-40f, 40f));
+            SpriteRenderer sparkRenderer = spark.AddComponent<SpriteRenderer>();
+            sparkRenderer.sprite = RuntimeArtLibrary.Get(RuntimeArtSpriteId.MuzzleFlash) ?? GeneratedSpriteLibrary.Get(GeneratedSpriteKind.Flash);
+            sparkRenderer.color = new Color(0.84f, 0.96f, 1f, 0.82f);
+            spark.AddComponent<TransientSpriteEffect>().Setup(
+                new Vector3(0.1f, 0.16f, 1f),
+                new Vector3(0.34f, 0.62f, 1f),
+                sparkRenderer.color,
+                new Color(0.34f, 0.78f, 1f, 0f),
+                0.12f,
+                169);
+        }
+
         private void SpawnCoreHitEffect(Vector3 position)
         {
             GameObject flash = new GameObject("_CoreHit");
@@ -936,6 +1665,25 @@ namespace ThunderFighter.Boss
 
                 TransientSpriteEffect effect = burst.AddComponent<TransientSpriteEffect>();
                 effect.Setup(new Vector3(0.3f, 0.65f, 1f), new Vector3(1.35f, 3f, 1f), renderer.color, new Color(1f, 0.38f, 0.06f, 0f), 0.44f, 149);
+            }
+        }
+
+        private void SpawnPhaseShiftVisual()
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                GameObject ring = new GameObject("_BossPhaseShift");
+                ring.transform.position = transform.position + new Vector3(0f, 0.1f + i * 0.08f, 0f);
+                SpriteRenderer renderer = ring.AddComponent<SpriteRenderer>();
+                renderer.sprite = GeneratedSpriteLibrary.Get(i == 0 ? GeneratedSpriteKind.Ring : GeneratedSpriteKind.Flash);
+                renderer.color = i == 0 ? new Color(0.58f, 0.92f, 1f, 0.78f) : new Color(1f, 0.84f, 0.44f, 0.7f);
+                ring.AddComponent<TransientSpriteEffect>().Setup(
+                    new Vector3(0.4f + i * 0.08f, 0.4f + i * 0.08f, 1f),
+                    new Vector3(2f + i * 0.45f, 2f + i * 0.45f, 1f),
+                    renderer.color,
+                    new Color(renderer.color.r, renderer.color.g, renderer.color.b, 0f),
+                    0.24f + i * 0.05f,
+                    177);
             }
         }
 
@@ -1056,3 +1804,5 @@ namespace ThunderFighter.Boss
         }
     }
 }
+
+
